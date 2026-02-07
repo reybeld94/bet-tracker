@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Bet Tracker (Local)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
+    .stats { display:flex; gap:14px; flex-wrap:wrap; }
+    .pill { padding: 6px 10px; border-radius: 999px; border: 1px solid #ddd; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+    .muted { color:#666; font-size: 12px; }
+    textarea { width: 100%; height: 70px; }
+    input, select { width: 100%; padding: 8px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display:flex; gap: 8px; }
+    button { padding: 8px 10px; cursor:pointer; }
+    .won { color: #0a7; font-weight: 700; }
+    .lost { color: #c33; font-weight: 700; }
+    .pending { color: #888; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>Bet Tracker (Local)</h1>
+
+  <div class="stats">
+    <div class="pill">Total: <b>{{ stats.total }}</b></div>
+    <div class="pill">W: <b>{{ stats.won }}</b></div>
+    <div class="pill">L: <b>{{ stats.lost }}</b></div>
+    <div class="pill">PUSH: <b>{{ stats.push }}</b></div>
+    <div class="pill">Pending: <b>{{ stats.pending }}</b></div>
+    <div class="pill">Winrate: <b>{{ stats.winrate }}%</b></div>
+    <div class="pill">Units: <b>{{ stats.units }}</b></div>
+  </div>
+
+  <div class="grid" style="margin-top:16px;">
+    <div class="card">
+      <h3>Agregar Pick</h3>
+      <form method="post" action="/picks/create">
+        <div class="row">
+          <div>
+            <label>Sport</label>
+            <input name="sport" placeholder="NBA" />
+          </div>
+          <div>
+            <label>Source</label>
+            <input name="source" placeholder="AI" value="AI" />
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label>Event</label>
+          <input name="event" placeholder="Pacers vs Bucks" />
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Market</label>
+            <input name="market" placeholder="Spread / ML / Total" />
+          </div>
+          <div>
+            <label>Selection</label>
+            <input name="selection" placeholder="Bucks +1.5 1H" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Odds (American)</label>
+            <input name="odds" placeholder="-110" />
+          </div>
+          <div>
+            <label>Stake (units)</label>
+            <input name="stake" placeholder="1" value="1" />
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label>GPT Name (opcional)</label>
+          <input name="gpt_name" placeholder="MiGPT-Bets" />
+        </div>
+
+        <div style="margin-top:10px;">
+          <label>Reasoning / Notes</label>
+          <textarea name="reasoning" placeholder="Pega aquí lo que te dijo el GPT..."></textarea>
+        </div>
+
+        <button type="submit" style="margin-top:10px;">Guardar</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Cómo usarlo</h3>
+      <ol>
+        <li>Agrega el pick cuando te lo dé la IA.</li>
+        <li>Cuando termine el partido, cambia el resultado a WON/LOST/PUSH.</li>
+        <li>La app calcula units automáticamente (WON/Lost).</li>
+      </ol>
+      <p class="muted">
+        Esto es un MVP: después le metemos filtros, export a Excel, login, múltiples parlays, tracking por liga, etc.
+      </p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>Últimos Picks</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Pick</th>
+          <th>Odds / Stake</th>
+          <th>Result</th>
+          <th>Units</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in picks %}
+        <tr>
+          <td>
+            <div><b>{{ p.event }}</b></div>
+            <div>{{ p.market }} — {{ p.selection }}</div>
+            <div class="muted">{{ p.sport }} | {{ p.source }}{% if p.gpt_name %} ({{ p.gpt_name }}){% endif %}</div>
+            {% if p.reasoning %}
+              <div class="muted" style="margin-top:6px; white-space:pre-wrap;">{{ p.reasoning }}</div>
+            {% endif %}
+          </td>
+          <td>
+            <div>Odds: <b>{{ p.odds }}</b></div>
+            <div>Stake: <b>{{ p.stake }}u</b></div>
+          </td>
+          <td>
+            {% if p.result == "WON" %}
+              <span class="won">WON</span>
+            {% elif p.result == "LOST" %}
+              <span class="lost">LOST</span>
+            {% elif p.result == "PUSH" %}
+              <span class="muted"><b>PUSH</b></span>
+            {% else %}
+              <span class="pending">PENDING</span>
+            {% endif %}
+          </td>
+          <td><b>{{ p.profit }}</b></td>
+          <td>
+            <div class="actions">
+              <form method="post" action="/picks/{{ p.id }}/set_result">
+                <select name="result">
+                  <option value="PENDING" {% if p.result=="PENDING" %}selected{% endif %}>PENDING</option>
+                  <option value="WON" {% if p.result=="WON" %}selected{% endif %}>WON</option>
+                  <option value="LOST" {% if p.result=="LOST" %}selected{% endif %}>LOST</option>
+                  <option value="PUSH" {% if p.result=="PUSH" %}selected{% endif %}>PUSH</option>
+                </select>
+                <button type="submit">Set</button>
+              </form>
+
+              <form method="post" action="/picks/{{ p.id }}/delete">
+                <button type="submit">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
