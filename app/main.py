@@ -1,4 +1,7 @@
 from datetime import date, datetime, timedelta
+import asyncio
+import logging
+import os
 import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -12,11 +15,16 @@ from sqlalchemy import desc
 from types import SimpleNamespace
 
 from .db import get_db
+from .ingestion.leagues import LEAGUE_PATHS
+from .ingestion.sync import sync_games_for_date
 from .models import Pick, Event, Game
 from .schemas import GameOut, GamesTodayResponse
 
 app = FastAPI(title="Bet Tracker (Local)")
 templates = Jinja2Templates(directory="app/templates")
+logger = logging.getLogger(__name__)
+_auto_ingest_task: asyncio.Task | None = None
+_auto_ingest_stop: asyncio.Event | None = None
 
 def american_profit_units(odds: float, stake: float) -> float:
     """
@@ -125,6 +133,79 @@ def parse_start_time(value: str) -> datetime | None:
         return datetime.fromisoformat(cleaned)
     except ValueError:
         return None
+
+def _parse_auto_ingest_leagues(raw: str) -> list[str]:
+    leagues = [league.strip().upper() for league in raw.split(",") if league.strip()]
+    invalid = [league for league in leagues if league not in LEAGUE_PATHS]
+    if invalid:
+        logger.error(
+            "Auto-ingest disabled due to unsupported leagues: %s. Supported: %s",
+            ", ".join(invalid),
+            ", ".join(sorted(LEAGUE_PATHS)),
+        )
+        return []
+    return leagues
+
+async def _run_auto_ingest_once(leagues: list[str]) -> None:
+    result = await asyncio.to_thread(sync_games_for_date, date.today(), leagues)
+    logger.info(
+        "Auto-ingest done: fetched=%s inserted=%s updated=%s skipped=%s errors=%s",
+        result.total_fetched,
+        result.inserted,
+        result.updated,
+        result.skipped,
+        result.errors,
+    )
+
+async def _auto_ingest_loop(interval_minutes: int, leagues: list[str]) -> None:
+    if interval_minutes < 1:
+        logger.error("Auto-ingest interval must be >= 1 minute.")
+        return
+    if not leagues:
+        logger.error("Auto-ingest has no valid leagues configured.")
+        return
+
+    logger.info(
+        "Auto-ingest enabled: interval=%s minutes leagues=%s",
+        interval_minutes,
+        ",".join(leagues),
+    )
+    while _auto_ingest_stop and not _auto_ingest_stop.is_set():
+        try:
+            await _run_auto_ingest_once(leagues)
+        except Exception:
+            logger.exception("Auto-ingest failed.")
+        try:
+            await asyncio.wait_for(
+                _auto_ingest_stop.wait(),
+                timeout=interval_minutes * 60,
+            )
+        except asyncio.TimeoutError:
+            continue
+
+@app.on_event("startup")
+async def start_auto_ingest() -> None:
+    global _auto_ingest_task, _auto_ingest_stop
+    enabled = os.getenv("AUTO_INGEST_ENABLED", "").lower() in {"1", "true", "yes"}
+    if not enabled:
+        return
+    interval_minutes = int(os.getenv("AUTO_INGEST_INTERVAL_MINUTES", "15"))
+    leagues_raw = os.getenv("AUTO_INGEST_LEAGUES", "NBA,NHL")
+    leagues = _parse_auto_ingest_leagues(leagues_raw)
+    _auto_ingest_stop = asyncio.Event()
+    _auto_ingest_task = asyncio.create_task(
+        _auto_ingest_loop(interval_minutes, leagues)
+    )
+
+@app.on_event("shutdown")
+async def stop_auto_ingest() -> None:
+    global _auto_ingest_task, _auto_ingest_stop
+    if _auto_ingest_stop:
+        _auto_ingest_stop.set()
+    if _auto_ingest_task:
+        await _auto_ingest_task
+    _auto_ingest_task = None
+    _auto_ingest_stop = None
 
 
 def parse_query_date(value: str | None) -> date:
