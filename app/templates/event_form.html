@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Nuevo Event</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; max-width: 760px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    input, select { width: 100%; padding: 8px; }
+    button { padding: 8px 10px; cursor:pointer; }
+    a { color: #0b5; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>Crear Event manual</h1>
+  <p><a href="/events/today">← Volver a Partidos del día</a></p>
+
+  <div class="card">
+    <form method="post" action="/events/create">
+      <div class="row">
+        <div>
+          <label>Sport</label>
+          <input name="sport" placeholder="NBA" />
+        </div>
+        <div>
+          <label>League</label>
+          <input name="league" placeholder="NBA" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Home Team</label>
+          <input name="home_team" placeholder="Lakers" />
+        </div>
+        <div>
+          <label>Away Team</label>
+          <input name="away_team" placeholder="Heat" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Start Time (ISO)</label>
+          <input name="start_time" placeholder="2025-01-01T19:30:00" />
+        </div>
+        <div>
+          <label>Status</label>
+          <select name="status">
+            <option value="SCHEDULED">SCHEDULED</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="FINAL">FINAL</option>
+          </select>
+        </div>
+      </div>
+
+      <button type="submit" style="margin-top:10px;">Guardar Event</button>
+    </form>
+  </div>
+</body>
+</html>

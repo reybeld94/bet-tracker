@@ -24,6 +24,10 @@
 </head>
 <body>
   <h1>Bet Tracker (Local)</h1>
+  <div class="actions" style="margin-bottom: 12px;">
+    <a href="/events/today">Partidos del día</a>
+    <a href="/events/new">Crear Event manual</a>
+  </div>
 
   <div class="stats">
     <div class="pill">Total: <b>{{ stats.total }}</b></div>
@@ -202,6 +206,7 @@
       <thead>
         <tr>
           <th>Pick</th>
+          <th>Status</th>
           <th>Odds / Stake</th>
           <th>Result</th>
           <th>Units</th>
@@ -230,6 +235,7 @@
               <div class="muted" style="margin-top:6px; white-space:pre-wrap;">{{ p.reasoning }}</div>
             {% endif %}
           </td>
+          <td><a href="/picks/{{ p.id }}">{{ p.status }}</a></td>
           <td>
             <div>Odds: <b>{{ p.odds }}</b></div>
             <div>Stake: <b>{{ p.stake }}u</b></div>
@@ -248,6 +254,7 @@
           <td><b>{{ p.profit }}</b></td>
           <td>
             <div class="actions">
+              <a href="/picks/{{ p.id }}">Ver</a>
               <form method="post" action="/picks/{{ p.id }}/set_result">
                 <select name="result">
                   <option value="PENDING" {% if p.result=="PENDING" %}selected{% endif %}>PENDING</option>
