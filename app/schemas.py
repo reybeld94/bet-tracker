@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
@@ -36,3 +37,28 @@ class PickOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class GameOut(BaseModel):
+    id: int
+    provider: str
+    provider_event_id: str
+    sport: str
+    league: str
+    start_time_utc: Optional[datetime]
+    status: str
+    home_team: str
+    away_team: str
+    home_score: Optional[int]
+    away_score: Optional[int]
+
+    class Config:
+        from_attributes = True
+
+
+class GamesTodayResponse(BaseModel):
+    games: list[GameOut]
+    date: str
+    league: Optional[str] = None
+    count: int
+    message: Optional[str] = None
