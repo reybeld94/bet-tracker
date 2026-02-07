@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Ingesta GPT — Bet Tracker</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+    textarea { width: 100%; height: 140px; }
+    input, select { width: 100%; padding: 8px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .muted { color:#666; font-size: 12px; }
+    .error { color:#c33; font-weight: 700; }
+    .actions { display:flex; gap: 8px; }
+    button { padding: 8px 10px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>Ingesta “pega el output del GPT”</h1>
+  <p class="muted">Pega el análisis y genera picks en estado DRAFT. No se aprueba nada automáticamente.</p>
+
+  <div class="card">
+    <form method="post" action="/ingest">
+      <div style="margin-bottom:10px;">
+        <label>Pega aquí el texto del GPT</label>
+        <textarea name="text" placeholder="Bucks +1.5 -130 1u">{{ text }}</textarea>
+      </div>
+
+      <div class="row" style="margin-bottom:10px;">
+        <div>
+          <label>Sport (opcional)</label>
+          <select name="sport">
+            <option value="">(Todos)</option>
+            {% for s in sports %}
+              <option value="{{ s }}" {% if s == selected_sport %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>League (opcional)</label>
+          <select name="league">
+            <option value="">(Todas)</option>
+            {% for l in leagues %}
+              <option value="{{ l }}" {% if l == selected_league %}selected{% endif %}>{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="row" style="margin-bottom:10px;">
+        <div>
+          <label>GPT Name (opcional)</label>
+          <input name="gpt_name" placeholder="MiGPT-Bets" value="{{ gpt_name }}" />
+        </div>
+        <div>
+          <label>Source</label>
+          <input name="source" placeholder="AI" value="{{ source }}" />
+        </div>
+      </div>
+
+      <button type="submit">Parse</button>
+    </form>
+  </div>
+
+  {% if picks %}
+    <div class="card">
+      <h2>Review de picks propuestos</h2>
+      <form method="post" action="/ingest/create">
+        <input type="hidden" name="pick_count" value="{{ picks|length }}" />
+        <input type="hidden" name="gpt_name" value="{{ gpt_name }}" />
+        <input type="hidden" name="source" value="{{ source }}" />
+
+        <table>
+          <thead>
+            <tr>
+              <th>Event</th>
+              <th>Market</th>
+              <th>Side</th>
+              <th>Line</th>
+              <th>Odds</th>
+              <th>Stake</th>
+              <th>Rec</th>
+              <th>Notas</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pick in picks %}
+              <tr>
+                <td>
+                  <select name="pick-{{ loop.index0 }}-event_id">
+                    <option value="">(Sin evento)</option>
+                    {% for event in events %}
+                      <option value="{{ event.id }}" {% if event.id == pick.event_id %}selected{% endif %}>
+                        {{ event.home_team }} vs {{ event.away_team }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                  {% if pick.error %}
+                    <div class="error">{{ pick.error }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  <select name="pick-{{ loop.index0 }}-market_type">
+                    <option value="ML" {% if pick.market_type == "ML" %}selected{% endif %}>ML</option>
+                    <option value="SPREAD" {% if pick.market_type == "SPREAD" %}selected{% endif %}>SPREAD</option>
+                    <option value="TOTAL" {% if pick.market_type == "TOTAL" %}selected{% endif %}>TOTAL</option>
+                  </select>
+                  <input type="hidden" name="pick-{{ loop.index0 }}-period" value="FG" />
+                </td>
+                <td>
+                  <select name="pick-{{ loop.index0 }}-side">
+                    <option value="">(Selecciona)</option>
+                    <option value="HOME" {% if pick.side == "HOME" %}selected{% endif %}>HOME</option>
+                    <option value="AWAY" {% if pick.side == "AWAY" %}selected{% endif %}>AWAY</option>
+                    <option value="OVER" {% if pick.side == "OVER" %}selected{% endif %}>OVER</option>
+                    <option value="UNDER" {% if pick.side == "UNDER" %}selected{% endif %}>UNDER</option>
+                  </select>
+                </td>
+                <td><input name="pick-{{ loop.index0 }}-line" value="{{ pick.line if pick.line is not none else '' }}" /></td>
+                <td><input name="pick-{{ loop.index0 }}-odds" value="{{ pick.odds }}" /></td>
+                <td><input name="pick-{{ loop.index0 }}-stake" value="{{ pick.stake }}" /></td>
+                <td>
+                  <select name="pick-{{ loop.index0 }}-recommendation">
+                    <option value="BET" {% if pick.recommendation == "BET" %}selected{% endif %}>BET</option>
+                    <option value="LEAN" {% if pick.recommendation == "LEAN" %}selected{% endif %}>LEAN</option>
+                    <option value="PASS" {% if pick.recommendation == "PASS" %}selected{% endif %}>PASS</option>
+                  </select>
+                </td>
+                <td>
+                  <input name="pick-{{ loop.index0 }}-reasoning" value="{{ pick.raw_line }}" />
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <div style="margin-top:10px;">
+          <button type="submit">Create Drafts</button>
+        </div>
+      </form>
+    </div>
+  {% endif %}
+</body>
+</html>
