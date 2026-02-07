@@ -5,14 +5,11 @@ from fastapi.requests import Request
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from .db import Base, engine, get_db
+from .db import get_db
 from .models import Pick
 
 app = FastAPI(title="Bet Tracker (Local)")
 templates = Jinja2Templates(directory="app/templates")
-
-# Crea tablas
-Base.metadata.create_all(bind=engine)
 
 def american_profit_units(odds: float, stake: float) -> float:
     """
