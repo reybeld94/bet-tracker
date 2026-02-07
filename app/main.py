@@ -186,6 +186,9 @@ async def _auto_ingest_loop(interval_minutes: int, leagues: list[str]) -> None:
 @app.on_event("startup")
 async def start_auto_ingest() -> None:
     global _auto_ingest_task, _auto_ingest_stop
+    enabled = os.getenv("AUTO_INGEST_ENABLED", "").lower() in {"1", "true", "yes"}
+    if not enabled:
+        return
     interval_minutes = int(os.getenv("AUTO_INGEST_INTERVAL_MINUTES", "15"))
     leagues_raw = os.getenv("AUTO_INGEST_LEAGUES", "NBA,NHL")
     leagues = _parse_auto_ingest_leagues(leagues_raw)
