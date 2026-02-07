@@ -16,6 +16,11 @@ class Event(Base):
     home_score = Column(Integer, nullable=True)
     away_score = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     picks = relationship("Pick", back_populates="event")
 
@@ -46,5 +51,10 @@ class Pick(Base):
     profit = Column(Float, default=0.0)          # en unidades (se calcula al cerrar)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     event = relationship("Event", back_populates="picks")
