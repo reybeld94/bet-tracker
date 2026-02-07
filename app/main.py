@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import re
 
 from fastapi import FastAPI, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -79,6 +80,89 @@ def validate_pick_contract(
 
     return errors
 
+def parse_gpt_text(text: str) -> list[dict]:
+    picks: list[dict] = []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines and text.strip():
+        lines = [text.strip()]
+
+    for line in lines:
+        upper_line = line.upper()
+        odds_match = re.search(r"([+-]\d{2,4})", upper_line)
+        odds = float(odds_match.group(1)) if odds_match else 0.0
+
+        stake_match = re.search(r"(\d+(?:\.\d+)?)\s*u\b", upper_line)
+        stake = float(stake_match.group(1)) if stake_match else 1.0
+
+        recommendation = "BET"
+        for rec in ("BET", "LEAN", "PASS"):
+            if rec in upper_line:
+                recommendation = rec
+                break
+
+        total_match = re.search(
+            r"\b(OVER|UNDER|O|U)\s*([0-9]+(?:\.[0-9]+)?)\b",
+            upper_line,
+        )
+        market_type = "ML"
+        line_value = None
+        side = ""
+
+        if total_match:
+            market_type = "TOTAL"
+            side = "OVER" if total_match.group(1) in {"OVER", "O"} else "UNDER"
+            line_value = float(total_match.group(2))
+        else:
+            signed_numbers = re.findall(r"([+-]\d+(?:\.\d+)?)", upper_line)
+            spread_value = None
+            for number in signed_numbers:
+                if odds_match and number == odds_match.group(1):
+                    continue
+                spread_value = float(number)
+                break
+            if spread_value is not None:
+                market_type = "SPREAD"
+                line_value = spread_value
+
+        picks.append(
+            {
+                "raw_line": line,
+                "market_type": market_type,
+                "side": side,
+                "line": line_value,
+                "odds": odds,
+                "stake": stake,
+                "recommendation": recommendation,
+            }
+        )
+
+    return picks
+
+def match_event_for_line(line: str, events: list[Event]) -> Event | None:
+    lower_line = line.lower()
+    best_event = None
+    best_score = 0
+    for event in events:
+        score = 0
+        if event.home_team and event.home_team.lower() in lower_line:
+            score += 1
+        if event.away_team and event.away_team.lower() in lower_line:
+            score += 1
+        if score > best_score:
+            best_event = event
+            best_score = score
+    return best_event if best_score > 0 else None
+
+def infer_side_from_event(line: str, event: Event | None) -> str:
+    if not event:
+        return ""
+    lower_line = line.lower()
+    if event.home_team and event.home_team.lower() in lower_line:
+        return "HOME"
+    if event.away_team and event.away_team.lower() in lower_line:
+        return "AWAY"
+    return ""
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)):
     picks = (
@@ -126,6 +210,187 @@ def home(request: Request, db: Session = Depends(get_db)):
 @app.get("/events/new", response_class=HTMLResponse)
 def new_event(request: Request):
     return templates.TemplateResponse("event_form.html", {"request": request})
+
+@app.get("/ingest", response_class=HTMLResponse)
+def ingest_form(
+    request: Request,
+    sport: str = "",
+    league: str = "",
+    db: Session = Depends(get_db),
+):
+    now = datetime.now()
+    start_day = datetime(now.year, now.month, now.day)
+    end_day = start_day + timedelta(days=1)
+    base_query = db.query(Event).filter(
+        Event.start_time.isnot(None),
+        Event.start_time >= start_day,
+        Event.start_time < end_day,
+    )
+
+    sports = [
+        row[0]
+        for row in base_query.with_entities(Event.sport).distinct().all()
+        if row[0]
+    ]
+    leagues = [
+        row[0]
+        for row in base_query.with_entities(Event.league).distinct().all()
+        if row[0]
+    ]
+
+    return templates.TemplateResponse(
+        "ingest.html",
+        {
+            "request": request,
+            "text": "",
+            "picks": [],
+            "events": [],
+            "sports": sorted(sports),
+            "leagues": sorted(leagues),
+            "selected_sport": sport.strip(),
+            "selected_league": league.strip(),
+            "gpt_name": "",
+            "source": "AI",
+            "errors": [],
+        },
+    )
+
+@app.post("/ingest", response_class=HTMLResponse)
+def ingest_parse(
+    request: Request,
+    text: str = Form(""),
+    sport: str = Form(""),
+    league: str = Form(""),
+    gpt_name: str = Form(""),
+    source: str = Form("AI"),
+    db: Session = Depends(get_db),
+):
+    now = datetime.now()
+    start_day = datetime(now.year, now.month, now.day)
+    end_day = start_day + timedelta(days=1)
+
+    base_query = db.query(Event).filter(
+        Event.start_time.isnot(None),
+        Event.start_time >= start_day,
+        Event.start_time < end_day,
+    )
+
+    sport_filter = sport.strip()
+    league_filter = league.strip()
+    filtered_query = base_query
+    if sport_filter:
+        filtered_query = filtered_query.filter(Event.sport == sport_filter)
+    if league_filter:
+        filtered_query = filtered_query.filter(Event.league == league_filter)
+
+    events = filtered_query.order_by(Event.start_time.asc()).all()
+    sports = [
+        row[0]
+        for row in base_query.with_entities(Event.sport).distinct().all()
+        if row[0]
+    ]
+    leagues = [
+        row[0]
+        for row in base_query.with_entities(Event.league).distinct().all()
+        if row[0]
+    ]
+
+    parsed_picks = parse_gpt_text(text)
+    picks: list[SimpleNamespace] = []
+    for pick in parsed_picks:
+        event = match_event_for_line(pick["raw_line"], events)
+        side = pick["side"]
+        if pick["market_type"] != "TOTAL":
+            side = infer_side_from_event(pick["raw_line"], event)
+        error_message = "" if event else "Needs event"
+        picks.append(
+            SimpleNamespace(
+                raw_line=pick["raw_line"],
+                market_type=pick["market_type"],
+                side=side,
+                line=pick["line"],
+                odds=pick["odds"],
+                stake=pick["stake"],
+                recommendation=pick["recommendation"],
+                event_id=event.id if event else None,
+                event_label=(
+                    f"{event.home_team} vs {event.away_team}" if event else ""
+                ),
+                error=error_message,
+            )
+        )
+
+    return templates.TemplateResponse(
+        "ingest.html",
+        {
+            "request": request,
+            "text": text,
+            "picks": picks,
+            "events": events,
+            "sports": sorted(sports),
+            "leagues": sorted(leagues),
+            "selected_sport": sport_filter,
+            "selected_league": league_filter,
+            "gpt_name": gpt_name,
+            "source": source.strip() or "AI",
+            "errors": [],
+        },
+    )
+
+@app.post("/ingest/create")
+async def ingest_create(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    pick_count = int(form.get("pick_count", 0))
+    gpt_name = form.get("gpt_name", "").strip()
+    source = form.get("source", "AI").strip() or "AI"
+    created_ids: list[int] = []
+
+    for index in range(pick_count):
+        prefix = f"pick-{index}-"
+        event_id_value = form.get(f"{prefix}event_id", "").strip()
+        parsed_event_id = int(event_id_value) if event_id_value else None
+        market_type = normalize_upper(form.get(f"{prefix}market_type", ""))
+        period = normalize_upper(form.get(f"{prefix}period", "FG")) or "FG"
+        side = normalize_upper(form.get(f"{prefix}side", ""))
+        recommendation = normalize_upper(
+            form.get(f"{prefix}recommendation", "BET")
+        )
+        line_value = form.get(f"{prefix}line", "").strip()
+        odds_value = form.get(f"{prefix}odds", "0").strip()
+        stake_value = form.get(f"{prefix}stake", "1").strip()
+        reasoning = form.get(f"{prefix}reasoning", "").strip()
+
+        parsed_line = float(line_value) if line_value else None
+        odds = float(odds_value) if odds_value else 0.0
+        stake = float(stake_value) if stake_value else 1.0
+
+        pick = Pick(
+            event_id=parsed_event_id,
+            sportsbook="",
+            market_type=market_type,
+            period=period,
+            line=parsed_line,
+            side=side,
+            odds=odds,
+            stake=stake,
+            recommendation=recommendation,
+            status="DRAFT",
+            source=source,
+            gpt_name=gpt_name,
+            reasoning=reasoning,
+            result="PENDING",
+            profit=0.0,
+        )
+        db.add(pick)
+        db.flush()
+        created_ids.append(pick.id)
+
+    db.commit()
+    if created_ids:
+        return RedirectResponse(
+            url=f"/picks/{created_ids[-1]}", status_code=303
+        )
+    return RedirectResponse(url="/", status_code=303)
 
 @app.get("/events/today", response_class=HTMLResponse)
 def events_today(
