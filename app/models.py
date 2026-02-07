@@ -1,6 +1,23 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from .db import Base
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sport = Column(String, nullable=False, default="")
+    league = Column(String, nullable=False, default="")
+    home_team = Column(String, nullable=False, default="")
+    away_team = Column(String, nullable=False, default="")
+    start_time = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, nullable=False, default="SCHEDULED")
+    home_score = Column(Integer, nullable=True)
+    away_score = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    picks = relationship("Pick", back_populates="event")
 
 class Pick(Base):
     __tablename__ = "picks"
@@ -8,12 +25,16 @@ class Pick(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     # Info del pick
-    sport = Column(String, default="")           # NBA, NFL, Soccer...
-    event = Column(String, default="")           # "Lakers vs Heat"
-    market = Column(String, default="")          # ML, Spread, Total...
-    selection = Column(String, default="")       # "Lakers -2.5"
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
+    sportsbook = Column(String, default="")
+    market_type = Column(String, default="")
+    period = Column(String, default="FG")
+    line = Column(Float, nullable=True)
+    side = Column(String, default="")
     odds = Column(Float, default=0.0)            # -110 -> -110.0, +120 -> 120.0
-    stake = Column(Float, default=1.0)           # unidades (1.0 = 1u)
+    stake = Column(Float, default=0.0)           # unidades (1.0 = 1u)
+    recommendation = Column(String, default="")
+    status = Column(String, default="DRAFT")
 
     # IA / origen
     source = Column(String, default="AI")        # "AI", "Manual", "Friend", etc.
@@ -25,3 +46,5 @@ class Pick(Base):
     profit = Column(Float, default=0.0)          # en unidades (se calcula al cerrar)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    event = relationship("Event", back_populates="picks")

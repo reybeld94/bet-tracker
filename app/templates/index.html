@@ -37,12 +37,68 @@
 
   <div class="grid" style="margin-top:16px;">
     <div class="card">
-      <h3>Agregar Pick</h3>
-      <form method="post" action="/picks/create">
+      <h3>Agregar Event</h3>
+      <form method="post" action="/events/create">
         <div class="row">
           <div>
             <label>Sport</label>
             <input name="sport" placeholder="NBA" />
+          </div>
+          <div>
+            <label>League</label>
+            <input name="league" placeholder="NBA" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Home Team</label>
+            <input name="home_team" placeholder="Lakers" />
+          </div>
+          <div>
+            <label>Away Team</label>
+            <input name="away_team" placeholder="Heat" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Start Time (ISO)</label>
+            <input name="start_time" placeholder="2025-01-01T19:30:00" />
+          </div>
+          <div>
+            <label>Status</label>
+            <select name="status">
+              <option value="SCHEDULED">SCHEDULED</option>
+              <option value="IN_PROGRESS">IN_PROGRESS</option>
+              <option value="FINAL">FINAL</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" style="margin-top:10px;">Guardar Event</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Agregar Pick</h3>
+      <form method="post" action="/picks/create">
+        <div>
+          <label>Event</label>
+          <select name="event_id">
+            <option value="">(Selecciona un Event)</option>
+            {% for e in events %}
+              <option value="{{ e.id }}">
+                {{ e.sport }} {{ e.league }} — {{ e.home_team }} vs {{ e.away_team }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Sportsbook</label>
+            <input name="sportsbook" placeholder="Hard Rock" />
           </div>
           <div>
             <label>Source</label>
@@ -50,19 +106,36 @@
           </div>
         </div>
 
-        <div style="margin-top:10px;">
-          <label>Event</label>
-          <input name="event" placeholder="Pacers vs Bucks" />
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Market Type</label>
+            <select name="market_type">
+              <option value="ML">ML</option>
+              <option value="SPREAD">SPREAD</option>
+              <option value="TOTAL">TOTAL</option>
+            </select>
+          </div>
+          <div>
+            <label>Period</label>
+            <select name="period">
+              <option value="FG">FG</option>
+            </select>
+          </div>
         </div>
 
         <div class="row" style="margin-top:10px;">
           <div>
-            <label>Market</label>
-            <input name="market" placeholder="Spread / ML / Total" />
+            <label>Line (Spread/Total)</label>
+            <input name="line" placeholder="2.5" />
           </div>
           <div>
-            <label>Selection</label>
-            <input name="selection" placeholder="Bucks +1.5 1H" />
+            <label>Side</label>
+            <select name="side">
+              <option value="HOME">HOME</option>
+              <option value="AWAY">AWAY</option>
+              <option value="OVER">OVER</option>
+              <option value="UNDER">UNDER</option>
+            </select>
           </div>
         </div>
 
@@ -74,6 +147,25 @@
           <div>
             <label>Stake (units)</label>
             <input name="stake" placeholder="1" value="1" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Recommendation</label>
+            <select name="recommendation">
+              <option value="BET">BET</option>
+              <option value="LEAN">LEAN</option>
+              <option value="PASS">PASS</option>
+            </select>
+          </div>
+          <div>
+            <label>Status</label>
+            <select name="status">
+              <option value="DRAFT">DRAFT</option>
+              <option value="APPROVED">APPROVED</option>
+              <option value="VOIDED">VOIDED</option>
+            </select>
           </div>
         </div>
 
@@ -120,9 +212,20 @@
         {% for p in picks %}
         <tr>
           <td>
-            <div><b>{{ p.event }}</b></div>
-            <div>{{ p.market }} — {{ p.selection }}</div>
-            <div class="muted">{{ p.sport }} | {{ p.source }}{% if p.gpt_name %} ({{ p.gpt_name }}){% endif %}</div>
+            <div>
+              <b>
+                {% if p.event %}
+                  {{ p.event.sport }} {{ p.event.league }} — {{ p.event.home_team }} vs {{ p.event.away_team }}
+                {% else %}
+                  (Sin Event)
+                {% endif %}
+              </b>
+            </div>
+            <div>{{ p.market_type }} {{ p.side }}{% if p.line is not none %} {{ p.line }}{% endif %} — {{ p.period }}</div>
+            <div class="muted">
+              {{ p.sportsbook }} | {{ p.source }}
+              {% if p.gpt_name %} ({{ p.gpt_name }}){% endif %}
+            </div>
             {% if p.reasoning %}
               <div class="muted" style="margin-top:6px; white-space:pre-wrap;">{{ p.reasoning }}</div>
             {% endif %}
