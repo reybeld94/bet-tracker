@@ -15,6 +15,7 @@ from sqlalchemy import desc
 from types import SimpleNamespace
 
 from .db import get_db
+from .ingestion.espn_client import fetch_scoreboard, normalize_dates
 from .ingestion.leagues import LEAGUE_PATHS
 from .ingestion.sync import sync_games_for_date
 from .models import Pick, Event, Game
@@ -659,6 +660,41 @@ def api_games_today(
         league=normalized_league,
         count=len(games),
         message=message,
+    )
+
+
+@app.get("/api/espn/scoreboard")
+def api_espn_scoreboard(
+    league: str = "NBA",
+    date: str | None = None,
+):
+    normalized_league = league.strip().upper() if league else "NBA"
+    payload = fetch_scoreboard(normalized_league, date)
+    if payload.get("error"):
+        return payload
+
+    events = payload.get("events") or []
+    safe_dates = None
+    try:
+        safe_dates = normalize_dates(date)
+    except ValueError:
+        safe_dates = None
+    return {
+        "ok": True,
+        "league": normalized_league,
+        "dates": safe_dates,
+        "count": len(events),
+        "events": events,
+    }
+
+
+@app.get("/espn/scoreboard", response_class=HTMLResponse)
+def espn_scoreboard_page(request: Request):
+    return templates.TemplateResponse(
+        "espn_scoreboard.html",
+        {
+            "request": request,
+        },
     )
 
 @app.get("/events/{event_id}", response_class=HTMLResponse)

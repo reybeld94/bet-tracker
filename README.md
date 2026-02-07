@@ -102,3 +102,14 @@ Notas:
 - `AUTO_INGEST_ENABLED`: habilita la ingesta periódica.
 - `AUTO_INGEST_LEAGUES`: lista de ligas separadas por coma.
 - `AUTO_INGEST_INTERVAL_MINUTES`: cada cuántos minutos se re-sincroniza (mínimo 1).
+
+## ESPN Scoreboard (endpoint y base URL)
+
+El cliente ESPN usa la variable `ESPN_BASE_URL` (default: `https://site.api.espn.com`).
+Si necesitas apuntar a otro host, exporta la variable antes de correr la app.
+
+### Prueba rápida del scoreboard
+
+```bash
+python -m app.ingestion.probe --league NBA --date today
+```
