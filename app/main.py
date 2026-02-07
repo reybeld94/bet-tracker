@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import re
+from urllib.parse import quote
 
 from fastapi import FastAPI, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -26,6 +27,90 @@ def american_profit_units(odds: float, stake: float) -> float:
     if odds > 0:
         return stake * (odds / 100.0)
     return stake * (100.0 / abs(odds))
+
+def settle_pick_for_event(pick: Pick, event: Event) -> tuple[str, float] | None:
+    if pick.status != "APPROVED" or pick.period != "FG":
+        return None
+    if event.home_score is None or event.away_score is None:
+        return None
+
+    home_score = event.home_score
+    away_score = event.away_score
+    market_type = pick.market_type
+    side = pick.side
+    line = pick.line if pick.line is not None else 0.0
+
+    result = "PUSH"
+    if market_type == "ML":
+        if home_score > away_score:
+            result = "WON" if side == "HOME" else "LOST"
+        elif away_score > home_score:
+            result = "WON" if side == "AWAY" else "LOST"
+        else:
+            result = "PUSH"
+    elif market_type == "SPREAD":
+        if side == "HOME":
+            adjusted_home = home_score + line
+            if adjusted_home > away_score:
+                result = "WON"
+            elif adjusted_home < away_score:
+                result = "LOST"
+            else:
+                result = "PUSH"
+        elif side == "AWAY":
+            adjusted_away = away_score + line
+            if adjusted_away > home_score:
+                result = "WON"
+            elif adjusted_away < home_score:
+                result = "LOST"
+            else:
+                result = "PUSH"
+    elif market_type == "TOTAL":
+        total_score = home_score + away_score
+        if side == "OVER":
+            if total_score > line:
+                result = "WON"
+            elif total_score < line:
+                result = "LOST"
+            else:
+                result = "PUSH"
+        elif side == "UNDER":
+            if total_score < line:
+                result = "WON"
+            elif total_score > line:
+                result = "LOST"
+            else:
+                result = "PUSH"
+    else:
+        return None
+
+    if result == "WON":
+        profit = round(american_profit_units(pick.odds, pick.stake), 3)
+    elif result == "LOST":
+        profit = round(-pick.stake, 3)
+    else:
+        profit = 0.0
+
+    return result, profit
+
+def settle_event_picks(db: Session, event: Event) -> dict[str, int]:
+    picks = (
+        db.query(Pick)
+        .filter(Pick.event_id == event.id, Pick.status == "APPROVED")
+        .all()
+    )
+    settled = 0
+    relapsed = 0
+    for pick in picks:
+        settlement = settle_pick_for_event(pick, event)
+        if not settlement:
+            continue
+        if pick.result != "PENDING":
+            relapsed += 1
+        pick.result, pick.profit = settlement
+        settled += 1
+    db.commit()
+    return {"settled": settled, "relapsed": relapsed}
 
 def normalize_upper(value: str) -> str:
     return value.strip().upper()
@@ -174,13 +259,14 @@ def home(request: Request, db: Session = Depends(get_db)):
     )
     events = db.query(Event).order_by(desc(Event.start_time)).limit(100).all()
 
-    total = db.query(Pick).count()
-    won = db.query(Pick).filter(Pick.result == "WON").count()
-    lost = db.query(Pick).filter(Pick.result == "LOST").count()
-    push = db.query(Pick).filter(Pick.result == "PUSH").count()
-    pending = db.query(Pick).filter(Pick.result == "PENDING").count()
+    approved_query = db.query(Pick).filter(Pick.status == "APPROVED")
+    total = approved_query.count()
+    won = approved_query.filter(Pick.result == "WON").count()
+    lost = approved_query.filter(Pick.result == "LOST").count()
+    push = approved_query.filter(Pick.result == "PUSH").count()
+    pending = approved_query.filter(Pick.result == "PENDING").count()
 
-    profit = db.query(Pick).with_entities(Pick.profit).all()
+    profit = approved_query.with_entities(Pick.profit).all()
     total_profit = round(sum([p[0] for p in profit]), 3) if profit else 0.0
 
     decided = won + lost + push
@@ -441,6 +527,63 @@ def events_today(
             "selected_league": league_filter,
             "start_day": start_day,
         },
+    )
+
+@app.get("/events/{event_id}", response_class=HTMLResponse)
+def event_detail(
+    request: Request,
+    event_id: int,
+    warning: str = "",
+    db: Session = Depends(get_db),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event no encontrado")
+    picks = (
+        db.query(Pick)
+        .filter(Pick.event_id == event.id)
+        .order_by(desc(Pick.created_at))
+        .all()
+    )
+    return templates.TemplateResponse(
+        "event_detail.html",
+        {
+            "request": request,
+            "event": event,
+            "picks": picks,
+            "warning": warning,
+        },
+    )
+
+@app.post("/events/{event_id}/final")
+def set_event_final(
+    event_id: int,
+    home_score: int = Form(...),
+    away_score: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event no encontrado")
+
+    score_changed = (
+        event.home_score != home_score or event.away_score != away_score
+    )
+    event.home_score = home_score
+    event.away_score = away_score
+    event.status = "FINAL"
+    db.commit()
+
+    settlement = settle_event_picks(db, event)
+    warning = ""
+    if settlement["relapsed"] > 0 or score_changed:
+        warning = (
+            "Re-liquidación ejecutada: "
+            f"{settlement['settled']} picks, "
+            f"{settlement['relapsed']} ya tenían resultado."
+        )
+    return RedirectResponse(
+        url=f"/events/{event.id}?warning={quote(warning)}", status_code=303
     )
 
 @app.get("/picks/new", response_class=HTMLResponse)

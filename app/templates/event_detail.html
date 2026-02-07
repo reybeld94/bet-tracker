@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Detalle Event</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; max-width: 920px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .muted { color:#666; font-size: 12px; }
+    .pill { padding: 4px 8px; border-radius: 999px; border: 1px solid #ddd; display: inline-block; }
+    .actions { display:flex; gap: 8px; align-items: center; }
+    .warning { background: #fff3cd; border: 1px solid #ffeeba; padding: 10px; border-radius: 8px; margin-bottom: 12px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+    input { width: 100%; padding: 8px; }
+    button { padding: 8px 10px; cursor:pointer; }
+    a { color: #0b5; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>Detalle Event</h1>
+  <p>
+    <a href="/">← Volver a home</a>
+    | <a href="/events/today">Partidos del día</a>
+  </p>
+
+  {% if warning %}
+    <div class="warning">{{ warning }}</div>
+  {% endif %}
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="row">
+      <div>
+        <div class="muted">Event</div>
+        <div><b>{{ event.sport }} {{ event.league }}</b></div>
+        <div>{{ event.home_team }} vs {{ event.away_team }}</div>
+      </div>
+      <div>
+        <div class="muted">Status</div>
+        <div class="pill">{{ event.status }}</div>
+      </div>
+    </div>
+
+    <form method="post" action="/events/{{ event.id }}/final" style="margin-top:16px;">
+      <div class="row">
+        <div>
+          <label>Home Score</label>
+          <input name="home_score" type="number" value="{{ event.home_score if event.home_score is not none else '' }}" required />
+        </div>
+        <div>
+          <label>Away Score</label>
+          <input name="away_score" type="number" value="{{ event.away_score if event.away_score is not none else '' }}" required />
+        </div>
+      </div>
+      <button type="submit" style="margin-top:10px;">Set FINAL</button>
+      <div class="muted" style="margin-top:8px;">
+        Al marcar FINAL se liquidan picks APPROVED (ML/SPREAD/TOTAL) en Full Game.
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Picks del Event</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Pick</th>
+          <th>Status</th>
+          <th>Result</th>
+          <th>Units</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in picks %}
+        <tr>
+          <td>
+            <div>{{ p.market_type }} {{ p.side }}{% if p.line is not none %} {{ p.line }}{% endif %} — {{ p.period }}</div>
+            <div class="muted">Odds {{ p.odds }} | Stake {{ p.stake }}u</div>
+          </td>
+          <td><a href="/picks/{{ p.id }}">{{ p.status }}</a></td>
+          <td>{{ p.result }}</td>
+          <td>{{ p.profit }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="muted">No hay picks para este event.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
