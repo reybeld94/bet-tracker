@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Detalle Pick</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; max-width: 860px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .muted { color:#666; font-size: 12px; }
+    .pill { padding: 4px 8px; border-radius: 999px; border: 1px solid #ddd; display: inline-block; }
+    .errors { background: #ffecec; border: 1px solid #ffb3b3; padding: 10px; border-radius: 8px; margin-bottom: 12px; }
+    button { padding: 8px 10px; cursor:pointer; }
+    a { color: #0b5; text-decoration: none; }
+    .actions { display:flex; gap: 8px; align-items: center; }
+  </style>
+</head>
+<body>
+  <h1>Detalle Pick</h1>
+  <p>
+    <a href="/">← Volver a home</a>
+    | <a href="/events/today">Partidos del día</a>
+  </p>
+
+  {% if errors %}
+    <div class="errors">
+      <strong>No se pudo aprobar:</strong>
+      <ul>
+        {% for error in errors %}
+          <li>{{ error }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="muted">Event</div>
+        <div>
+          {% if pick.event %}
+            <b>{{ pick.event.sport }} {{ pick.event.league }}</b> — {{ pick.event.home_team }} vs {{ pick.event.away_team }}
+          {% else %}
+            (Sin Event)
+          {% endif %}
+        </div>
+      </div>
+      <div>
+        <div class="muted">Status</div>
+        <div class="pill">{{ pick.status }}</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <div>
+        <div class="muted">Market</div>
+        <div>{{ pick.market_type }} {{ pick.side }}{% if pick.line is not none %} {{ pick.line }}{% endif %} — {{ pick.period }}</div>
+      </div>
+      <div>
+        <div class="muted">Odds / Stake</div>
+        <div>{{ pick.odds }} / {{ pick.stake }}u</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <div>
+        <div class="muted">Sportsbook</div>
+        <div>{{ pick.sportsbook }}</div>
+      </div>
+      <div>
+        <div class="muted">Recommendation</div>
+        <div>{{ pick.recommendation }}</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <div>
+        <div class="muted">Source</div>
+        <div>{{ pick.source }}{% if pick.gpt_name %} ({{ pick.gpt_name }}){% endif %}</div>
+      </div>
+      <div>
+        <div class="muted">Resultado</div>
+        <div>{{ pick.result }}</div>
+      </div>
+    </div>
+
+    {% if pick.reasoning %}
+      <div style="margin-top:12px;">
+        <div class="muted">Reasoning</div>
+        <div style="white-space: pre-wrap;">{{ pick.reasoning }}</div>
+      </div>
+    {% endif %}
+
+    <div class="actions" style="margin-top:16px;">
+      <a href="/picks/{{ pick.id }}/edit">Edit</a>
+      <form method="post" action="/picks/{{ pick.id }}/approve">
+        <button type="submit">Approve</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

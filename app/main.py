@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
+from types import SimpleNamespace
 
 from .db import get_db
 from .models import Pick, Event
@@ -112,12 +113,91 @@ def home(request: Request, db: Session = Depends(get_db)):
         "decided": decided,
     }
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "picks": picks,
-        "stats": stats,
-        "events": events,
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "picks": picks,
+            "stats": stats,
+            "events": events,
+        },
+    )
+
+@app.get("/events/new", response_class=HTMLResponse)
+def new_event(request: Request):
+    return templates.TemplateResponse("event_form.html", {"request": request})
+
+@app.get("/events/today", response_class=HTMLResponse)
+def events_today(
+    request: Request,
+    sport: str = "",
+    league: str = "",
+    db: Session = Depends(get_db),
+):
+    now = datetime.now()
+    start_day = datetime(now.year, now.month, now.day)
+    end_day = start_day + timedelta(days=1)
+
+    base_query = db.query(Event).filter(
+        Event.start_time.isnot(None),
+        Event.start_time >= start_day,
+        Event.start_time < end_day,
+    )
+
+    sport_filter = sport.strip()
+    league_filter = league.strip()
+
+    filtered_query = base_query
+    if sport_filter:
+        filtered_query = filtered_query.filter(Event.sport == sport_filter)
+    if league_filter:
+        filtered_query = filtered_query.filter(Event.league == league_filter)
+
+    events = filtered_query.order_by(Event.start_time.asc()).all()
+    sports = [
+        row[0]
+        for row in base_query.with_entities(Event.sport).distinct().all()
+        if row[0]
+    ]
+    leagues = [
+        row[0]
+        for row in base_query.with_entities(Event.league).distinct().all()
+        if row[0]
+    ]
+
+    return templates.TemplateResponse(
+        "events_today.html",
+        {
+            "request": request,
+            "events": events,
+            "sports": sorted(sports),
+            "leagues": sorted(leagues),
+            "selected_sport": sport_filter,
+            "selected_league": league_filter,
+            "start_day": start_day,
+        },
+    )
+
+@app.get("/picks/new", response_class=HTMLResponse)
+def new_pick(
+    request: Request,
+    event_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    events = db.query(Event).order_by(desc(Event.start_time)).limit(200).all()
+    selected_event = None
+    if event_id:
+        selected_event = db.query(Event).filter(Event.id == event_id).first()
+    return templates.TemplateResponse(
+        "pick_form.html",
+        {
+            "request": request,
+            "events": events,
+            "selected_event": selected_event,
+            "errors": [],
+            "pick": None,
+        },
+    )
 
 @app.post("/events/create")
 def create_event(
@@ -141,10 +221,11 @@ def create_event(
     )
     db.add(event)
     db.commit()
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/events/today", status_code=303)
 
 @app.post("/picks/create")
 def create_pick(
+    request: Request,
     event_id: str = Form(""),
     sportsbook: str = Form(""),
     market_type: str = Form(""),
@@ -179,7 +260,36 @@ def create_pick(
         line=parsed_line,
     )
     if errors:
-        raise HTTPException(status_code=400, detail=errors)
+        events = db.query(Event).order_by(desc(Event.start_time)).limit(200).all()
+        selected_event = None
+        if parsed_event_id:
+            selected_event = db.query(Event).filter(Event.id == parsed_event_id).first()
+        pick_preview = SimpleNamespace(
+            event_id=parsed_event_id,
+            sportsbook=sportsbook.strip(),
+            market_type=normalized_market,
+            period=normalized_period,
+            line=parsed_line,
+            side=normalized_side,
+            odds=float(odds),
+            stake=float(stake),
+            recommendation=normalized_recommendation,
+            status=normalized_status,
+            source=source.strip() or "AI",
+            gpt_name=gpt_name.strip(),
+            reasoning=reasoning.strip(),
+        )
+        return templates.TemplateResponse(
+            "pick_form.html",
+            {
+                "request": request,
+                "events": events,
+                "selected_event": selected_event,
+                "pick": pick_preview,
+                "errors": errors,
+            },
+            status_code=400,
+        )
 
     pick = Pick(
         event_id=parsed_event_id,
@@ -200,7 +310,173 @@ def create_pick(
     )
     db.add(pick)
     db.commit()
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=f"/picks/{pick.id}", status_code=303)
+
+@app.get("/picks/{pick_id}", response_class=HTMLResponse)
+def pick_detail(
+    request: Request,
+    pick_id: int,
+    db: Session = Depends(get_db),
+):
+    pick = (
+        db.query(Pick)
+        .options(joinedload(Pick.event))
+        .filter(Pick.id == pick_id)
+        .first()
+    )
+    if not pick:
+        raise HTTPException(status_code=404, detail="Pick no encontrado")
+    return templates.TemplateResponse(
+        "pick_detail.html",
+        {"request": request, "pick": pick, "errors": []},
+    )
+
+@app.get("/picks/{pick_id}/edit", response_class=HTMLResponse)
+def edit_pick(
+    request: Request,
+    pick_id: int,
+    db: Session = Depends(get_db),
+):
+    pick = db.query(Pick).filter(Pick.id == pick_id).first()
+    if not pick:
+        raise HTTPException(status_code=404, detail="Pick no encontrado")
+    events = db.query(Event).order_by(desc(Event.start_time)).limit(200).all()
+    return templates.TemplateResponse(
+        "pick_form.html",
+        {
+            "request": request,
+            "events": events,
+            "selected_event": pick.event,
+            "pick": pick,
+            "errors": [],
+        },
+    )
+
+@app.post("/picks/{pick_id}/update")
+def update_pick(
+    request: Request,
+    pick_id: int,
+    event_id: str = Form(""),
+    sportsbook: str = Form(""),
+    market_type: str = Form(""),
+    period: str = Form("FG"),
+    line: str = Form(""),
+    side: str = Form(""),
+    odds: float = Form(0.0),
+    stake: float = Form(0.0),
+    recommendation: str = Form(""),
+    status: str = Form("DRAFT"),
+    source: str = Form("AI"),
+    gpt_name: str = Form(""),
+    reasoning: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    pick = db.query(Pick).filter(Pick.id == pick_id).first()
+    if not pick:
+        raise HTTPException(status_code=404, detail="Pick no encontrado")
+
+    normalized_status = normalize_upper(status) or "DRAFT"
+    normalized_market = normalize_upper(market_type)
+    normalized_side = normalize_upper(side)
+    normalized_recommendation = normalize_upper(recommendation)
+    normalized_period = normalize_upper(period) or "FG"
+    parsed_event_id = int(event_id) if event_id.strip() else None
+    parsed_line = float(line) if line.strip() else None
+    errors = validate_pick_contract(
+        status=normalized_status,
+        event_id=parsed_event_id,
+        market_type=normalized_market,
+        period=normalized_period,
+        side=normalized_side,
+        odds=float(odds),
+        stake=float(stake),
+        recommendation=normalized_recommendation,
+        line=parsed_line,
+    )
+    if errors:
+        events = db.query(Event).order_by(desc(Event.start_time)).limit(200).all()
+        selected_event = None
+        if parsed_event_id:
+            selected_event = db.query(Event).filter(Event.id == parsed_event_id).first()
+        pick_preview = SimpleNamespace(
+            event_id=parsed_event_id,
+            sportsbook=sportsbook.strip(),
+            market_type=normalized_market,
+            period=normalized_period,
+            line=parsed_line,
+            side=normalized_side,
+            odds=float(odds),
+            stake=float(stake),
+            recommendation=normalized_recommendation,
+            status=normalized_status,
+            source=source.strip() or "AI",
+            gpt_name=gpt_name.strip(),
+            reasoning=reasoning.strip(),
+        )
+        return templates.TemplateResponse(
+            "pick_form.html",
+            {
+                "request": request,
+                "events": events,
+                "selected_event": selected_event,
+                "pick": pick_preview,
+                "errors": errors,
+            },
+            status_code=400,
+        )
+
+    pick.event_id = parsed_event_id
+    pick.sportsbook = sportsbook.strip()
+    pick.market_type = normalized_market
+    pick.period = normalized_period
+    pick.line = parsed_line
+    pick.side = normalized_side
+    pick.odds = float(odds)
+    pick.stake = float(stake)
+    pick.recommendation = normalized_recommendation
+    pick.status = normalized_status
+    pick.source = source.strip() or "AI"
+    pick.gpt_name = gpt_name.strip()
+    pick.reasoning = reasoning.strip()
+    db.commit()
+    return RedirectResponse(url=f"/picks/{pick.id}", status_code=303)
+
+@app.post("/picks/{pick_id}/approve")
+def approve_pick(
+    request: Request,
+    pick_id: int,
+    db: Session = Depends(get_db),
+):
+    pick = (
+        db.query(Pick)
+        .options(joinedload(Pick.event))
+        .filter(Pick.id == pick_id)
+        .first()
+    )
+    if not pick:
+        raise HTTPException(status_code=404, detail="Pick no encontrado")
+
+    errors = validate_pick_contract(
+        status="APPROVED",
+        event_id=pick.event_id,
+        market_type=pick.market_type,
+        period=pick.period,
+        side=pick.side,
+        odds=pick.odds,
+        stake=pick.stake,
+        recommendation=pick.recommendation,
+        line=pick.line,
+    )
+    if errors:
+        return templates.TemplateResponse(
+            "pick_detail.html",
+            {"request": request, "pick": pick, "errors": errors},
+            status_code=400,
+        )
+
+    pick.status = "APPROVED"
+    db.commit()
+    return RedirectResponse(url=f"/picks/{pick.id}", status_code=303)
 
 @app.post("/picks/{pick_id}/set_result")
 def set_result(
