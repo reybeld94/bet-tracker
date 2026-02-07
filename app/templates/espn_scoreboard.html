@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>ESPN Scoreboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    input, select { width: 100%; padding: 8px; }
+    button { padding: 8px 10px; cursor:pointer; }
+    .muted { color:#666; font-size: 12px; }
+    .error { color:#c33; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>ESPN Scoreboard</h1>
+  <p class="muted">Carga directa desde ESPN para validar que el endpoint responde.</p>
+  <div class="actions" style="margin-bottom: 12px;">
+    <a href="/">Ir a home</a>
+  </div>
+
+  <div class="card">
+    <form id="scoreboard-form">
+      <div class="row">
+        <div>
+          <label>League</label>
+          <select name="league">
+            <option value="NBA">NBA</option>
+            <option value="NHL">NHL</option>
+            <option value="NFL">NFL</option>
+          </select>
+        </div>
+        <div>
+          <label>Date (YYYY-MM-DD o YYYYMMDD)</label>
+          <input name="date" placeholder="2024-01-15" />
+        </div>
+      </div>
+      <button type="submit" style="margin-top:10px;">Cargar</button>
+    </form>
+  </div>
+
+  <div id="status" class="muted">Cargando…</div>
+  <ul id="events"></ul>
+
+  <script>
+    const form = document.getElementById('scoreboard-form');
+    const statusEl = document.getElementById('status');
+    const eventsEl = document.getElementById('events');
+
+    function renderEvents(events) {
+      eventsEl.innerHTML = '';
+      events.forEach((event) => {
+        const item = document.createElement('li');
+        const name = event.name || event.shortName || 'Evento';
+        const dateValue = event.date ? new Date(event.date).toLocaleString() : '';
+        item.textContent = dateValue ? `${name} — ${dateValue}` : name;
+        eventsEl.appendChild(item);
+      });
+    }
+
+    async function loadScoreboard() {
+      statusEl.classList.remove('error');
+      statusEl.textContent = 'Cargando…';
+      eventsEl.innerHTML = '';
+
+      const formData = new FormData(form);
+      const league = formData.get('league');
+      const date = formData.get('date');
+      const params = new URLSearchParams();
+      if (league) params.append('league', league);
+      if (date) params.append('date', date);
+
+      try {
+        const response = await fetch(`/api/espn/scoreboard?${params.toString()}`);
+        const data = await response.json();
+        if (!response.ok || data.error || data.ok === false) {
+          statusEl.textContent = 'Error conectando a ESPN (ver logs)';
+          statusEl.classList.add('error');
+          return;
+        }
+        if (!data.events || data.events.length === 0) {
+          statusEl.textContent = 'No hay juegos para esta fecha';
+          return;
+        }
+        statusEl.textContent = `Eventos encontrados: ${data.events.length}`;
+        renderEvents(data.events);
+      } catch (error) {
+        statusEl.textContent = 'Error conectando a ESPN (ver logs)';
+        statusEl.classList.add('error');
+      }
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      loadScoreboard();
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      loadScoreboard();
+    });
+  </script>
+</body>
+</html>
