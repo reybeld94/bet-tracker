@@ -1,6 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import re
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -11,7 +12,8 @@ from sqlalchemy import desc
 from types import SimpleNamespace
 
 from .db import get_db
-from .models import Pick, Event
+from .models import Pick, Event, Game
+from .schemas import GameOut, GamesTodayResponse
 
 app = FastAPI(title="Bet Tracker (Local)")
 templates = Jinja2Templates(directory="app/templates")
@@ -123,6 +125,22 @@ def parse_start_time(value: str) -> datetime | None:
         return datetime.fromisoformat(cleaned)
     except ValueError:
         return None
+
+
+def parse_query_date(value: str | None) -> date:
+    if not value:
+        return datetime.now(ZoneInfo("America/New_York")).date()
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+
+
+def ny_date_range_utc(day: date) -> tuple[datetime, datetime]:
+    ny_tz = ZoneInfo("America/New_York")
+    start_local = datetime.combine(day, datetime.min.time(), tzinfo=ny_tz)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
 
 def validate_pick_contract(
     *,
@@ -527,6 +545,39 @@ def events_today(
             "selected_league": league_filter,
             "start_day": start_day,
         },
+    )
+
+
+@app.get("/api/games/today", response_model=GamesTodayResponse)
+def api_games_today(
+    league: str | None = None,
+    date: str | None = None,
+    db: Session = Depends(get_db),
+):
+    query_date = parse_query_date(date)
+    start_utc, end_utc = ny_date_range_utc(query_date)
+
+    query = db.query(Game).filter(
+        Game.start_time_utc.isnot(None),
+        Game.start_time_utc >= start_utc,
+        Game.start_time_utc < end_utc,
+    )
+
+    normalized_league = None
+    if league:
+        normalized_league = league.strip().upper()
+        if normalized_league:
+            query = query.filter(Game.league == normalized_league)
+
+    games = query.order_by(Game.start_time_utc.asc()).all()
+    message = "No games found for requested date." if not games else None
+
+    return GamesTodayResponse(
+        games=[GameOut.model_validate(game) for game in games],
+        date=query_date.isoformat(),
+        league=normalized_league,
+        count=len(games),
+        message=message,
     )
 
 @app.get("/events/{event_id}", response_class=HTMLResponse)
