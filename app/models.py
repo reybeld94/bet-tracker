@@ -5,8 +5,13 @@ from .db import Base
 
 class Event(Base):
     __tablename__ = "events"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_event_id", name="uq_events_provider_event_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String, nullable=True, default=None)
+    provider_event_id = Column(String, nullable=True, default=None)
     sport = Column(String, nullable=False, default="")
     league = Column(String, nullable=False, default="")
     home_team = Column(String, nullable=False, default="")

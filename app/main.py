@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from .db import get_db
 from .ingestion.espn_client import fetch_scoreboard, normalize_dates
 from .ingestion.leagues import LEAGUE_PATHS
+from .ingestion.espn_parser import parse_scoreboard
 from .ingestion.sync import sync_games_for_date
 from .models import Pick, Event, Game
 from .schemas import GameOut, GamesTodayResponse
@@ -134,6 +135,89 @@ def parse_start_time(value: str) -> datetime | None:
         return datetime.fromisoformat(cleaned)
     except ValueError:
         return None
+
+def _normalize_event_status(status: str) -> str:
+    mapping = {
+        "scheduled": "SCHEDULED",
+        "in_progress": "IN_PROGRESS",
+        "final": "FINAL",
+        "postponed": "POSTPONED",
+        "canceled": "CANCELED",
+    }
+    return mapping.get(status.lower(), status.upper())
+
+def _dto_start_time_local(dto_start_time: datetime) -> datetime:
+    local_tz = ZoneInfo("America/New_York")
+    return dto_start_time.astimezone(local_tz).replace(tzinfo=None)
+
+def _upsert_event_from_dto(db: Session, dto) -> bool:
+    existing = (
+        db.query(Event)
+        .filter(
+            Event.provider == dto.provider,
+            Event.provider_event_id == dto.provider_event_id,
+        )
+        .one_or_none()
+    )
+    start_time = _dto_start_time_local(dto.start_time_utc)
+    status = _normalize_event_status(dto.status)
+    if existing:
+        changed = False
+        if existing.sport != dto.sport:
+            existing.sport = dto.sport
+            changed = True
+        if existing.league != dto.league:
+            existing.league = dto.league
+            changed = True
+        if existing.home_team != dto.home_team_name:
+            existing.home_team = dto.home_team_name
+            changed = True
+        if existing.away_team != dto.away_team_name:
+            existing.away_team = dto.away_team_name
+            changed = True
+        if existing.start_time != start_time:
+            existing.start_time = start_time
+            changed = True
+        if existing.status != status:
+            existing.status = status
+            changed = True
+        if existing.home_score != dto.home_score:
+            existing.home_score = dto.home_score
+            changed = True
+        if existing.away_score != dto.away_score:
+            existing.away_score = dto.away_score
+            changed = True
+        return changed
+
+    event = Event(
+        provider=dto.provider,
+        provider_event_id=dto.provider_event_id,
+        sport=dto.sport,
+        league=dto.league,
+        home_team=dto.home_team_name,
+        away_team=dto.away_team_name,
+        start_time=start_time,
+        status=status,
+        home_score=dto.home_score,
+        away_score=dto.away_score,
+    )
+    db.add(event)
+    return True
+
+def _sync_events_from_espn(db: Session, target_date: date, leagues: list[str]) -> None:
+    for league_key in leagues:
+        payload = fetch_scoreboard(league_key, target_date)
+        if payload.get("error"):
+            logger.warning(
+                "ESPN fetch failed for league=%s date=%s error=%s",
+                league_key,
+                target_date,
+                payload.get("error"),
+            )
+            continue
+        games = parse_scoreboard(payload, league_key)
+        for dto in games:
+            _upsert_event_from_dto(db, dto)
 
 def _parse_auto_ingest_leagues(raw: str) -> list[str]:
     leagues = [league.strip().upper() for league in raw.split(",") if league.strip()]
@@ -588,6 +672,20 @@ def events_today(
     now = datetime.now()
     start_day = datetime(now.year, now.month, now.day)
     end_day = start_day + timedelta(days=1)
+    league_filter = league.strip()
+    leagues_to_fetch: list[str]
+    if league_filter:
+        normalized_league = league_filter.upper()
+        if normalized_league in LEAGUE_PATHS:
+            leagues_to_fetch = [normalized_league]
+        else:
+            logger.warning("Unsupported league for ESPN sync: %s", league_filter)
+            leagues_to_fetch = []
+    else:
+        leagues_to_fetch = sorted(LEAGUE_PATHS.keys())
+    if leagues_to_fetch:
+        _sync_events_from_espn(db, start_day.date(), leagues_to_fetch)
+        db.commit()
 
     base_query = db.query(Event).filter(
         Event.start_time.isnot(None),
@@ -596,7 +694,6 @@ def events_today(
     )
 
     sport_filter = sport.strip()
-    league_filter = league.strip()
 
     filtered_query = base_query
     if sport_filter:
