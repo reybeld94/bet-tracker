@@ -17,16 +17,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("events", sa.Column("provider", sa.String(), nullable=True))
-    op.add_column("events", sa.Column("provider_event_id", sa.String(), nullable=True))
-    op.create_unique_constraint(
-        "uq_events_provider_event_id",
-        "events",
-        ["provider", "provider_event_id"],
-    )
+    with op.batch_alter_table("events") as batch_op:
+        batch_op.add_column(sa.Column("provider", sa.String(), nullable=True))
+        batch_op.add_column(sa.Column("provider_event_id", sa.String(), nullable=True))
+        batch_op.create_unique_constraint(
+            "uq_events_provider_event_id",
+            ["provider", "provider_event_id"],
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_events_provider_event_id", "events", type_="unique")
-    op.drop_column("events", "provider_event_id")
-    op.drop_column("events", "provider")
+    with op.batch_alter_table("events") as batch_op:
+        batch_op.drop_constraint("uq_events_provider_event_id", type_="unique")
+        batch_op.drop_column("provider_event_id")
+        batch_op.drop_column("provider")
