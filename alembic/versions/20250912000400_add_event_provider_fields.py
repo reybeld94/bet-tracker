@@ -20,14 +20,16 @@ def upgrade() -> None:
     with op.batch_alter_table("events") as batch_op:
         batch_op.add_column(sa.Column("provider", sa.String(), nullable=True))
         batch_op.add_column(sa.Column("provider_event_id", sa.String(), nullable=True))
-        batch_op.create_unique_constraint(
-            "uq_events_provider_event_id",
-            ["provider", "provider_event_id"],
-        )
+    op.create_index(
+        "ux_events_provider_event_id",
+        "events",
+        ["provider", "provider_event_id"],
+        unique=True,
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ux_events_provider_event_id", table_name="events")
     with op.batch_alter_table("events") as batch_op:
-        batch_op.drop_constraint("uq_events_provider_event_id", type_="unique")
         batch_op.drop_column("provider_event_id")
         batch_op.drop_column("provider")
