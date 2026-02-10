@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Auto Picks Settings</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; max-width: 720px; }
+    label { display:block; margin-top: 12px; font-weight: bold; }
+    input, select { width: 100%; padding: 8px; margin-top: 6px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .muted { color:#666; font-size: 12px; }
+    .actions { margin-top: 16px; }
+    .notice { background: #f0f8ff; border: 1px solid #cfe0ff; padding: 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Auto Picks Settings</h1>
+  {% if saved %}
+    <div class="notice">Settings saved.</div>
+  {% endif %}
+
+  <form method="post" action="/ui/settings">
+    <label>Admin Password</label>
+    <input type="password" name="admin_password" value="{{ admin_password }}" placeholder="APP_ADMIN_PASSWORD" required />
+
+    <label>OpenAI API Key</label>
+    <input type="password" name="openai_api_key" placeholder="{{ 'API key stored' if has_key else 'sk-...' }}" />
+    <div class="muted">Tu API key se guarda encriptada.</div>
+
+    <div class="row">
+      <div>
+        <label>Model</label>
+        <input name="openai_model" value="{{ settings.openai_model }}" />
+      </div>
+      <div>
+        <label>Reasoning effort</label>
+        <select name="openai_reasoning_effort">
+          {% for option in ['low', 'medium', 'high'] %}
+            <option value="{{ option }}" {% if settings.openai_reasoning_effort == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Concurrency</label>
+        <input type="number" min="1" name="auto_picks_concurrency" value="{{ settings.auto_picks_concurrency }}" />
+      </div>
+      <div>
+        <label>Poll seconds</label>
+        <input type="number" min="5" name="auto_picks_poll_seconds" value="{{ settings.auto_picks_poll_seconds }}" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Max retries</label>
+        <input type="number" min="0" name="auto_picks_max_retries" value="{{ settings.auto_picks_max_retries }}" />
+      </div>
+    </div>
+
+    <label>
+      <input type="checkbox" name="auto_picks_enabled" {% if settings.auto_picks_enabled %}checked{% endif %} />
+      Auto picks enabled
+    </label>
+
+    <label>
+      <input type="checkbox" name="allow_totals_default" {% if settings.allow_totals_default %}checked{% endif %} />
+      Allow totals by default
+    </label>
+
+    <div class="actions">
+      <button type="submit">Save</button>
+      <a href="/">Back</a>
+    </div>
+  </form>
+</body>
+</html>
