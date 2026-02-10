@@ -140,7 +140,6 @@ def home(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/ui/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, db: Session = Depends(get_db)):
-    _ensure_admin(request)
     settings = get_or_create_settings(db)
     has_key = bool(settings.openai_api_key_enc)
     return templates.TemplateResponse(
@@ -149,7 +148,6 @@ async def settings_page(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "settings": settings,
             "has_key": has_key,
-            "admin_password": _admin_password_from_request(request) or "",
         },
     )
 
@@ -157,7 +155,6 @@ async def settings_page(request: Request, db: Session = Depends(get_db)):
 @app.post("/ui/settings", response_class=HTMLResponse)
 async def settings_save(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
-    _ensure_admin(request, form.get("admin_password"))
 
     settings = get_or_create_settings(db)
     api_key = form.get("openai_api_key", "").strip()
@@ -182,7 +179,6 @@ async def settings_save(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "settings": settings,
             "has_key": bool(settings.openai_api_key_enc),
-            "admin_password": form.get("admin_password", ""),
             "saved": True,
         },
     )
@@ -311,20 +307,3 @@ def ny_date_range_utc(day: date) -> tuple[datetime, datetime]:
     start_local = datetime.combine(day, datetime.min.time(), tzinfo=ny_tz)
     end_local = start_local + timedelta(days=1)
     return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
-
-
-def _admin_password_from_request(request: Request) -> str | None:
-    return request.headers.get("X-Admin-Password") or request.query_params.get(
-        "admin_password"
-    )
-
-
-def _ensure_admin(request: Request, password: str | None = None) -> None:
-    if request.client is None or request.client.host != "127.0.0.1":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    expected = os.getenv("APP_ADMIN_PASSWORD", "").strip()
-    if not expected:
-        raise HTTPException(status_code=500, detail="APP_ADMIN_PASSWORD not configured")
-    provided = password or _admin_password_from_request(request) or ""
-    if provided != expected:
-        raise HTTPException(status_code=403, detail="Forbidden")

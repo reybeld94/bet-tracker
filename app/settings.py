@@ -1,16 +1,9 @@
 from __future__ import annotations
 
-import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from cryptography.fernet import Fernet, InvalidToken
-
 from app.models import AppSettings
-
-logger = logging.getLogger(__name__)
-_FERNET: Fernet | None = None
 
 
 @dataclass(frozen=True)
@@ -66,35 +59,13 @@ def snapshot_settings(settings: AppSettings) -> SettingsSnapshot:
     )
 
 
-def get_fernet() -> Fernet:
-    global _FERNET
-    if _FERNET is not None:
-        return _FERNET
-    secret = (os.getenv("APP_SECRET_KEY") or "").strip()
-    if not secret:
-        secret = Fernet.generate_key().decode("utf-8")
-        logger.warning(
-            "APP_SECRET_KEY missing. Generated a temporary key: %s. "
-            "Set APP_SECRET_KEY to this value to persist decryption.",
-            secret,
-        )
-    _FERNET = Fernet(secret.encode("utf-8"))
-    return _FERNET
-
-
 def encrypt_api_key(api_key: str | None) -> str | None:
     if not api_key:
         return None
-    fernet = get_fernet()
-    return fernet.encrypt(api_key.encode("utf-8")).decode("utf-8")
+    return api_key
 
 
 def decrypt_api_key(encrypted: str | None) -> str | None:
     if not encrypted:
         return None
-    fernet = get_fernet()
-    try:
-        return fernet.decrypt(encrypted.encode("utf-8")).decode("utf-8")
-    except InvalidToken:
-        logger.error("Failed to decrypt OpenAI API key. Check APP_SECRET_KEY.")
-        return None
+    return encrypted
