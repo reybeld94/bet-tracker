@@ -1,46 +1,48 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Bet Tracker (Local)</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
-    .stats { display:flex; gap:14px; flex-wrap:wrap; }
-    .pill { padding: 6px 10px; border-radius: 999px; border: 1px solid #ddd; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; }
-    .muted { color:#666; font-size: 12px; }
-    .actions { display:flex; gap: 8px; }
-  </style>
-</head>
-<body>
-  <h1>Bet Tracker (Local)</h1>
-  <div class="actions" style="margin-bottom: 12px;">
-    <a href="/espn/scoreboard">ESPN Scoreboard</a>
-    <a href="/ui/settings">Auto Picks Settings</a>
-  </div>
+{% extends "base.html" %}
+{% block title %}Dashboard — Bet Tracker{% endblock %}
 
-  <div class="stats">
-    <div class="pill">Total: <b>{{ stats.total }}</b></div>
-    <div class="pill">BET: <b>{{ stats.bet }}</b></div>
-    <div class="pill">LEAN: <b>{{ stats.lean }}</b></div>
-    <div class="pill">NO_BET: <b>{{ stats.no_bet }}</b></div>
-  </div>
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <p class="subtitle">Resumen de auto-picks recientes</p>
+</div>
 
-  <div class="grid" style="margin-top:16px;">
-    <div class="card">
-      <h3>Auto picks recientes</h3>
+<!-- Stats Bar -->
+<div class="stats-bar">
+  <div class="stat-pill total">
+    <span>Total</span>
+    <span class="stat-value">{{ stats.total }}</span>
+  </div>
+  <div class="stat-pill bet">
+    <span>BET</span>
+    <span class="stat-value">{{ stats.bet }}</span>
+  </div>
+  <div class="stat-pill lean">
+    <span>LEAN</span>
+    <span class="stat-value">{{ stats.lean }}</span>
+  </div>
+  <div class="stat-pill no-bet">
+    <span>NO BET</span>
+    <span class="stat-value">{{ stats.no_bet }}</span>
+  </div>
+</div>
+
+<div class="grid-2">
+  <!-- Picks Table -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-header">
+      <h3>Auto Picks Recientes</h3>
+    </div>
+    <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>Juego</th>
             <th>Resultado</th>
             <th>Market</th>
-            <th>Selección</th>
-            <th>EV</th>
-            <th>Conf.</th>
+            <th style="text-align:center;">Confianza</th>
+            <th style="text-align:right;">EV</th>
+            <th style="text-align:right;">Stake</th>
           </tr>
         </thead>
         <tbody>
@@ -49,38 +51,98 @@
             <tr>
               <td>
                 {% if game %}
-                  {{ game.home_team }} vs {{ game.away_team }}
-                  <div class="muted">{{ game.league }} · {{ game.start_time_utc }}</div>
+                  <div class="flex items-center gap-2">
+                    <div class="matchup">
+                      {% set home_logo = team_logo_url(game.home_team) %}
+                      {% set away_logo = team_logo_url(game.away_team) %}
+                      {% if home_logo %}
+                        <img src="{{ home_logo }}" alt="" class="team-logo sm" />
+                      {% endif %}
+                      <span class="team-name">{{ game.home_team }}</span>
+                      <span class="vs-divider">vs</span>
+                      {% if away_logo %}
+                        <img src="{{ away_logo }}" alt="" class="team-logo sm" />
+                      {% endif %}
+                      <span class="team-name">{{ game.away_team }}</span>
+                    </div>
+                  </div>
+                  <div class="text-xs text-muted mt-1">
+                    <span class="league-badge {{ game.league|lower }}">
+                      {% set ll = league_logo_url(game.league) %}
+                      {% if ll %}<img src="{{ ll }}" alt="" />{% endif %}
+                      {{ game.league }}
+                    </span>
+                    <span style="margin-left:6px;">{{ game.start_time_utc.strftime('%m/%d %H:%M') if game.start_time_utc else '' }} UTC</span>
+                  </div>
                 {% else %}
-                  Game #{{ pick.game_id }}
+                  <span class="text-muted">Game #{{ pick.game_id }}</span>
                 {% endif %}
               </td>
-              <td><b>{{ pick.result }}</b> {{ pick.emoji }}</td>
-              <td>{{ pick.market or '-' }}</td>
-              <td>{{ pick.selection or '-' }}</td>
-              <td>{{ pick.ev if pick.ev is not none else '-' }}</td>
-              <td>{{ pick.confidence }}</td>
+              <td>
+                {% if pick.result == 'BET' %}
+                  <span class="badge badge-bet">{{ pick.emoji }} BET</span>
+                {% elif pick.result == 'LEAN' %}
+                  <span class="badge badge-lean">{{ pick.emoji }} LEAN</span>
+                {% else %}
+                  <span class="badge badge-no-bet">{{ pick.emoji }} NO BET</span>
+                {% endif %}
+              </td>
+              <td>
+                <span class="font-bold">{{ pick.market or '-' }}</span>
+                {% if pick.selection %}
+                  <div class="text-xs text-muted">{{ pick.selection }}</div>
+                {% endif %}
+              </td>
+              <td style="text-align:center;">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+                  <span class="text-sm font-bold">{{ pick.confidence }}%</span>
+                  <div class="confidence-bar" style="width:60px;">
+                    <div class="fill {% if pick.confidence >= 70 %}high{% elif pick.confidence >= 40 %}medium{% else %}low{% endif %}" style="width:{{ pick.confidence }}%;"></div>
+                  </div>
+                </div>
+              </td>
+              <td style="text-align:right;">
+                {% if pick.ev is not none %}
+                  <span class="{% if pick.ev > 0 %}ev-positive{% elif pick.ev < 0 %}ev-negative{% endif %} text-mono">
+                    {% if pick.ev > 0 %}+{% endif %}{{ "%.1f"|format(pick.ev) }}%
+                  </span>
+                {% else %}
+                  <span class="text-muted">-</span>
+                {% endif %}
+              </td>
+              <td style="text-align:right;">
+                {% if pick.stake_u %}
+                  <span class="font-bold">{{ pick.stake_u }}u</span>
+                {% else %}
+                  <span class="text-muted">-</span>
+                {% endif %}
+              </td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="6" class="muted">No hay picks todavía.</td>
+              <td colspan="6" class="table-empty">
+                No hay picks todavia. Los picks se generan automaticamente 2 horas antes de cada juego.
+              </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-
-    <div class="card">
-      <h3>Cómo usarlo</h3>
-      <ol>
-        <li>Configura tu API key y ajustes en <a href="/ui/settings">/ui/settings</a>.</li>
-        <li>Ejecuta la ingesta y enqueue de jobs para el día.</li>
-        <li>Arranca el worker para que procese los auto-picks.</li>
-      </ol>
-      <p class="muted">
-        Los picks se generan automáticamente 2 horas antes de cada juego usando OpenAI.
-      </p>
-    </div>
   </div>
-</body>
-</html>
+</div>
+
+<!-- How To -->
+<div class="card mt-3 how-to" style="max-width:600px;">
+  <div class="card-header">
+    <h3>Como usarlo</h3>
+  </div>
+  <ol>
+    <li>Configura tu API key y ajustes en <a href="/ui/settings">Settings</a>.</li>
+    <li>Ejecuta la ingesta y enqueue de jobs para el dia.</li>
+    <li>Arranca el worker para que procese los auto-picks.</li>
+  </ol>
+  <p class="text-muted text-sm mt-2">
+    Los picks se generan automaticamente 2 horas antes de cada juego usando OpenAI.
+  </p>
+</div>
+{% endblock %}

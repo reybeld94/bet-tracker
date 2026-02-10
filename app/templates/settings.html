@@ -1,76 +1,92 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Auto Picks Settings</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; max-width: 720px; }
-    label { display:block; margin-top: 12px; font-weight: bold; }
-    input, select { width: 100%; padding: 8px; margin-top: 6px; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .muted { color:#666; font-size: 12px; }
-    .actions { margin-top: 16px; }
-    .notice { background: #f0f8ff; border: 1px solid #cfe0ff; padding: 10px; border-radius: 8px; }
-  </style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}Settings — Bet Tracker{% endblock %}
+
+{% block content %}
+<div class="page-header">
   <h1>Auto Picks Settings</h1>
-  {% if saved %}
-    <div class="notice">Settings saved.</div>
-  {% endif %}
+  <p class="subtitle">Configura OpenAI y opciones de auto-picks</p>
+</div>
 
+<div class="breadcrumb">
+  <a href="/">Dashboard</a>
+  <span class="sep">/</span>
+  <span>Settings</span>
+</div>
+
+{% if saved %}
+  <div class="notice notice-success">
+    Settings guardados correctamente.
+  </div>
+{% endif %}
+
+<div class="card" style="max-width:760px;">
   <form method="post" action="/ui/settings">
-    <label>OpenAI API Key</label>
-    <input type="password" name="openai_api_key" placeholder="{{ 'API key stored' if has_key else 'sk-...' }}" />
-    <div class="muted">La API key se guarda en configuración local.</div>
+    <!-- OpenAI API Key -->
+    <div class="form-group">
+      <label>OpenAI API Key</label>
+      <input type="password" name="openai_api_key" placeholder="{{ 'API key almacenada' if has_key else 'sk-...' }}" />
+      <div class="form-hint">La API key se guarda encriptada en la base de datos local.</div>
+    </div>
 
-    <div class="row">
-      <div>
+    <!-- Model & Reasoning -->
+    <div class="form-row">
+      <div class="form-group">
         <label>Model</label>
         <input name="openai_model" value="{{ settings.openai_model }}" />
       </div>
-      <div>
-        <label>Reasoning effort</label>
+      <div class="form-group">
+        <label>Reasoning Effort</label>
         <select name="openai_reasoning_effort">
           {% for option in ['low', 'medium', 'high'] %}
-            <option value="{{ option }}" {% if settings.openai_reasoning_effort == option %}selected{% endif %}>{{ option }}</option>
+            <option value="{{ option }}" {% if settings.openai_reasoning_effort == option %}selected{% endif %}>{{ option|capitalize }}</option>
           {% endfor %}
         </select>
       </div>
     </div>
 
-    <div class="row">
-      <div>
+    <!-- Concurrency & Polling -->
+    <div class="form-row">
+      <div class="form-group">
         <label>Concurrency</label>
         <input type="number" min="1" name="auto_picks_concurrency" value="{{ settings.auto_picks_concurrency }}" />
+        <div class="form-hint">Workers paralelos para procesar picks.</div>
       </div>
-      <div>
-        <label>Poll seconds</label>
+      <div class="form-group">
+        <label>Poll Seconds</label>
         <input type="number" min="5" name="auto_picks_poll_seconds" value="{{ settings.auto_picks_poll_seconds }}" />
+        <div class="form-hint">Intervalo entre chequeo de jobs.</div>
       </div>
     </div>
 
-    <div class="row">
-      <div>
-        <label>Max retries</label>
+    <!-- Max Retries -->
+    <div class="form-row">
+      <div class="form-group">
+        <label>Max Retries</label>
         <input type="number" min="0" name="auto_picks_max_retries" value="{{ settings.auto_picks_max_retries }}" />
       </div>
+      <div class="form-group"></div>
     </div>
 
-    <label>
-      <input type="checkbox" name="auto_picks_enabled" {% if settings.auto_picks_enabled %}checked{% endif %} />
-      Auto picks enabled
-    </label>
+    <!-- Checkboxes -->
+    <div class="form-group">
+      <label>
+        <input type="checkbox" name="auto_picks_enabled" {% if settings.auto_picks_enabled %}checked{% endif %} />
+        Auto picks enabled
+      </label>
+    </div>
 
-    <label>
-      <input type="checkbox" name="allow_totals_default" {% if settings.allow_totals_default %}checked{% endif %} />
-      Allow totals by default
-    </label>
+    <div class="form-group">
+      <label>
+        <input type="checkbox" name="allow_totals_default" {% if settings.allow_totals_default %}checked{% endif %} />
+        Allow totals by default
+      </label>
+    </div>
 
-    <div class="actions">
-      <button type="submit">Save</button>
-      <a href="/">Back</a>
+    <!-- Actions -->
+    <div class="actions-row mt-2">
+      <button type="submit" class="btn btn-primary">Guardar</button>
+      <a href="/" class="btn btn-secondary">Volver</a>
     </div>
   </form>
-</body>
-</html>
+</div>
+{% endblock %}

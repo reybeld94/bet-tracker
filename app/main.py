@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -22,9 +23,13 @@ from app.picks.enqueue import enqueue_due_games
 from app.picks.worker import run_worker_with_shutdown
 from app.schemas import GameOut, GamesTodayResponse, PickJobOut, PickOut
 from app.settings import encrypt_api_key, get_or_create_settings
+from app.team_logos import team_logo_url, league_logo_url
 
 app = FastAPI(title="Bet Tracker (Local)")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["team_logo_url"] = team_logo_url
+templates.env.globals["league_logo_url"] = league_logo_url
 logger = logging.getLogger(__name__)
 _auto_ingest_task: asyncio.Task | None = None
 _auto_ingest_stop: asyncio.Event | None = None
@@ -146,6 +151,7 @@ def home(request: Request, db: Session = Depends(get_db)):
             "picks": picks,
             "stats": stats,
             "games": game_lookup,
+            "active_page": "home",
         },
     )
 
@@ -160,6 +166,7 @@ async def settings_page(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "settings": settings,
             "has_key": has_key,
+            "active_page": "settings",
         },
     )
 
@@ -192,6 +199,7 @@ async def settings_save(request: Request, db: Session = Depends(get_db)):
             "settings": settings,
             "has_key": bool(settings.openai_api_key_enc),
             "saved": True,
+            "active_page": "settings",
         },
     )
 
@@ -301,6 +309,7 @@ def espn_scoreboard_page(request: Request):
         "espn_scoreboard.html",
         {
             "request": request,
+            "active_page": "espn",
         },
     )
 

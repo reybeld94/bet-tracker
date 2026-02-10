@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Bet Tracker{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a href="/" class="navbar-brand">
+        <span class="brand-icon">&#9917;</span>
+        Bet Tracker
+      </a>
+      <div class="navbar-links">
+        <a href="/" {% if active_page == 'home' %}class="active"{% endif %}>Dashboard</a>
+        <a href="/espn/scoreboard" {% if active_page == 'espn' %}class="active"{% endif %}>ESPN</a>
+        <a href="/ui/settings" {% if active_page == 'settings' %}class="active"{% endif %}>Settings</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page-wrapper">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

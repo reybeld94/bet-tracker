@@ -1,104 +1,141 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>ESPN Scoreboard</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    input, select { width: 100%; padding: 8px; }
-    button { padding: 8px 10px; cursor:pointer; }
-    .muted { color:#666; font-size: 12px; }
-    .error { color:#c33; font-weight: 700; }
-  </style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}ESPN Scoreboard — Bet Tracker{% endblock %}
+
+{% block content %}
+<div class="page-header">
   <h1>ESPN Scoreboard</h1>
-  <p class="muted">Carga directa desde ESPN para validar que el endpoint responde.</p>
-  <div class="actions" style="margin-bottom: 12px;">
-    <a href="/">Ir a home</a>
-  </div>
+  <p class="subtitle">Carga directa desde ESPN para validar que el endpoint responde.</p>
+</div>
 
-  <div class="card">
-    <form id="scoreboard-form">
-      <div class="row">
-        <div>
-          <label>League</label>
-          <select name="league">
-            <option value="NBA">NBA</option>
-            <option value="NHL">NHL</option>
-            <option value="NFL">NFL</option>
-          </select>
-        </div>
-        <div>
-          <label>Date (YYYY-MM-DD o YYYYMMDD)</label>
-          <input name="date" placeholder="2024-01-15" />
-        </div>
+<div class="breadcrumb">
+  <a href="/">Dashboard</a>
+  <span class="sep">/</span>
+  <span>ESPN Scoreboard</span>
+</div>
+
+<div class="card" style="max-width:700px; margin-bottom:24px;">
+  <form id="scoreboard-form">
+    <div class="form-row">
+      <div class="form-group">
+        <label>League</label>
+        <select name="league">
+          <option value="NBA">NBA</option>
+          <option value="NHL">NHL</option>
+          <option value="NFL">NFL</option>
+        </select>
       </div>
-      <button type="submit" style="margin-top:10px;">Cargar</button>
-    </form>
+      <div class="form-group">
+        <label>Date (YYYY-MM-DD)</label>
+        <input name="date" placeholder="2024-01-15" />
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary mt-1">Cargar</button>
+  </form>
+</div>
+
+<div id="status" class="text-muted mb-2">Cargando...</div>
+
+<div class="card" style="max-width:700px;">
+  <div class="card-header">
+    <h3>Eventos</h3>
+    <span id="event-count" class="badge badge-draft">0</span>
   </div>
+  <ul id="events" class="event-list"></ul>
+  <div id="empty-msg" class="table-empty" style="display:none;">No hay eventos para mostrar.</div>
+</div>
 
-  <div id="status" class="muted">Cargando…</div>
-  <ul id="events"></ul>
+<script>
+  const form = document.getElementById('scoreboard-form');
+  const statusEl = document.getElementById('status');
+  const eventsEl = document.getElementById('events');
+  const countEl = document.getElementById('event-count');
+  const emptyEl = document.getElementById('empty-msg');
 
-  <script>
-    const form = document.getElementById('scoreboard-form');
-    const statusEl = document.getElementById('status');
-    const eventsEl = document.getElementById('events');
+  function renderEvents(events) {
+    eventsEl.innerHTML = '';
+    emptyEl.style.display = events.length ? 'none' : 'block';
+    countEl.textContent = events.length;
 
-    function renderEvents(events) {
-      eventsEl.innerHTML = '';
-      events.forEach((event) => {
-        const item = document.createElement('li');
-        const name = event.name || event.shortName || 'Evento';
-        const dateValue = event.date ? new Date(event.date).toLocaleString() : '';
-        item.textContent = dateValue ? `${name} — ${dateValue}` : name;
-        eventsEl.appendChild(item);
-      });
-    }
+    events.forEach((event) => {
+      const item = document.createElement('li');
+      const name = event.name || event.shortName || 'Evento';
+      const dateValue = event.date ? new Date(event.date).toLocaleString() : '';
 
-    async function loadScoreboard() {
-      statusEl.classList.remove('error');
-      statusEl.textContent = 'Cargando…';
-      eventsEl.innerHTML = '';
+      // Try to extract team logos from competitors
+      const competitions = event.competitions || [];
+      const competitors = competitions.length ? competitions[0].competitors || [] : [];
+      let html = '';
 
-      const formData = new FormData(form);
-      const league = formData.get('league');
-      const date = formData.get('date');
-      const params = new URLSearchParams();
-      if (league) params.append('league', league);
-      if (date) params.append('date', date);
+      if (competitors.length >= 2) {
+        const home = competitors.find(c => c.homeAway === 'home') || competitors[0];
+        const away = competitors.find(c => c.homeAway === 'away') || competitors[1];
+        const homeLogo = home.team?.logo || '';
+        const awayLogo = away.team?.logo || '';
+        const homeName = home.team?.displayName || home.team?.name || '';
+        const awayName = away.team?.displayName || away.team?.name || '';
 
-      try {
-        const response = await fetch(`/api/espn/scoreboard?${params.toString()}`);
-        const data = await response.json();
-        if (!response.ok || data.error || data.ok === false) {
-          statusEl.textContent = 'Error conectando a ESPN (ver logs)';
-          statusEl.classList.add('error');
-          return;
-        }
-        if (!data.events || data.events.length === 0) {
-          statusEl.textContent = 'No hay juegos para esta fecha';
-          return;
-        }
-        statusEl.textContent = `Eventos encontrados: ${data.events.length}`;
-        renderEvents(data.events);
-      } catch (error) {
-        statusEl.textContent = 'Error conectando a ESPN (ver logs)';
-        statusEl.classList.add('error');
+        html = `
+          <div class="matchup" style="margin-bottom:4px;">
+            ${homeLogo ? `<img src="${homeLogo}" class="team-logo sm" alt="" />` : ''}
+            <span class="team-name">${homeName}</span>
+            <span class="vs-divider">vs</span>
+            ${awayLogo ? `<img src="${awayLogo}" class="team-logo sm" alt="" />` : ''}
+            <span class="team-name">${awayName}</span>
+          </div>
+          <div class="text-xs text-muted">${dateValue}</div>
+        `;
+      } else {
+        html = `<span>${name}</span>${dateValue ? ` <span class="text-muted text-xs">${dateValue}</span>` : ''}`;
       }
+
+      item.innerHTML = html;
+      eventsEl.appendChild(item);
+    });
+  }
+
+  async function loadScoreboard() {
+    statusEl.style.color = '';
+    statusEl.textContent = 'Cargando...';
+    eventsEl.innerHTML = '';
+    emptyEl.style.display = 'none';
+
+    const formData = new FormData(form);
+    const league = formData.get('league');
+    const date = formData.get('date');
+    const params = new URLSearchParams();
+    if (league) params.append('league', league);
+    if (date) params.append('date', date);
+
+    try {
+      const response = await fetch(`/api/espn/scoreboard?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok || data.error || data.ok === false) {
+        statusEl.textContent = 'Error conectando a ESPN (ver logs)';
+        statusEl.style.color = 'var(--accent-red)';
+        return;
+      }
+      if (!data.events || data.events.length === 0) {
+        statusEl.textContent = 'No hay juegos para esta fecha';
+        emptyEl.style.display = 'block';
+        countEl.textContent = '0';
+        return;
+      }
+      statusEl.textContent = `Eventos encontrados: ${data.events.length}`;
+      statusEl.style.color = 'var(--accent-green)';
+      renderEvents(data.events);
+    } catch (error) {
+      statusEl.textContent = 'Error conectando a ESPN (ver logs)';
+      statusEl.style.color = 'var(--accent-red)';
     }
+  }
 
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      loadScoreboard();
-    });
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    loadScoreboard();
+  });
 
-    window.addEventListener('DOMContentLoaded', () => {
-      loadScoreboard();
-    });
-  </script>
-</body>
-</html>
+  window.addEventListener('DOMContentLoaded', () => {
+    loadScoreboard();
+  });
+</script>
+{% endblock %}
