@@ -1,150 +1,160 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>{% if pick %}Editar Pick{% else %}Crear Pick{% endif %}</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; max-width: 860px; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    input, select, textarea { width: 100%; padding: 8px; }
-    textarea { height: 90px; }
-    button { padding: 8px 10px; cursor:pointer; }
-    a { color: #0b5; text-decoration: none; }
-    .errors { background: #ffecec; border: 1px solid #ffb3b3; padding: 10px; border-radius: 8px; margin-bottom: 12px; }
-  </style>
-</head>
-<body>
-  <h1>{% if pick %}Editar Pick{% else %}Crear Pick{% endif %}</h1>
-  <p>
-    <a href="/events/today">← Volver a Partidos del día</a>
-    {% if pick %}
-      | <a href="/picks/{{ pick.id }}">Ver detalle</a>
-    {% endif %}
-  </p>
+{% extends "base.html" %}
+{% block title %}{% if pick %}Editar Pick{% else %}Crear Pick{% endif %} — Bet Tracker{% endblock %}
 
-  {% if errors %}
-    <div class="errors">
+{% block content %}
+<div class="page-header">
+  <h1>{% if pick %}Editar Pick{% else %}Crear Pick{% endif %}</h1>
+</div>
+
+<div class="breadcrumb">
+  <a href="/">Dashboard</a>
+  <span class="sep">/</span>
+  <a href="/events/today">Partidos</a>
+  <span class="sep">/</span>
+  {% if pick %}
+    <a href="/picks/{{ pick.id }}">Pick #{{ pick.id }}</a>
+    <span class="sep">/</span>
+    <span>Editar</span>
+  {% else %}
+    <span>Nuevo Pick</span>
+  {% endif %}
+</div>
+
+{% if errors %}
+  <div class="notice notice-error">
+    <div>
       <strong>No se pudo guardar:</strong>
-      <ul>
+      <ul style="margin:6px 0 0 16px;">
         {% for error in errors %}
           <li>{{ error }}</li>
         {% endfor %}
       </ul>
     </div>
-  {% endif %}
+  </div>
+{% endif %}
 
-  <div class="card">
-    <form method="post" action="{% if pick %}/picks/{{ pick.id }}/update{% else %}/picks/create{% endif %}">
-      <div>
-        <label>Event</label>
-        <select name="event_id">
-          <option value="">(Selecciona un Event)</option>
-          {% for e in events %}
-            {% set is_selected = false %}
-            {% if pick and pick.event_id == e.id %}
-              {% set is_selected = true %}
-            {% elif selected_event and selected_event.id == e.id %}
-              {% set is_selected = true %}
-            {% endif %}
-            <option value="{{ e.id }}" {% if is_selected %}selected{% endif %}>
-              {{ e.sport }} {{ e.league }} — {{ e.home_team }} vs {{ e.away_team }}
-            </option>
-          {% endfor %}
+<div class="card" style="max-width:860px;">
+  <form method="post" action="{% if pick %}/picks/{{ pick.id }}/update{% else %}/picks/create{% endif %}">
+    <!-- Event -->
+    <div class="form-group">
+      <label>Event</label>
+      <select name="event_id">
+        <option value="">(Selecciona un Event)</option>
+        {% for e in events %}
+          {% set is_selected = false %}
+          {% if pick and pick.event_id == e.id %}
+            {% set is_selected = true %}
+          {% elif selected_event and selected_event.id == e.id %}
+            {% set is_selected = true %}
+          {% endif %}
+          <option value="{{ e.id }}" {% if is_selected %}selected{% endif %}>
+            {{ e.sport }} {{ e.league }} — {{ e.home_team }} vs {{ e.away_team }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Sportsbook & Source -->
+    <div class="form-row">
+      <div class="form-group">
+        <label>Sportsbook</label>
+        <input name="sportsbook" placeholder="Hard Rock" value="{{ pick.sportsbook if pick else '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Source</label>
+        <input name="source" placeholder="AI" value="{{ pick.source if pick else 'AI' }}" />
+      </div>
+    </div>
+
+    <!-- Market Type & Period -->
+    <div class="form-row">
+      <div class="form-group">
+        <label>Market Type</label>
+        {% set current_market = pick.market_type if pick else 'ML' %}
+        <select name="market_type">
+          <option value="ML" {% if current_market == 'ML' %}selected{% endif %}>ML</option>
+          <option value="SPREAD" {% if current_market == 'SPREAD' %}selected{% endif %}>SPREAD</option>
+          <option value="TOTAL" {% if current_market == 'TOTAL' %}selected{% endif %}>TOTAL</option>
         </select>
       </div>
-
-      <div class="row" style="margin-top:10px;">
-        <div>
-          <label>Sportsbook</label>
-          <input name="sportsbook" placeholder="Hard Rock" value="{{ pick.sportsbook if pick else '' }}" />
-        </div>
-        <div>
-          <label>Source</label>
-          <input name="source" placeholder="AI" value="{{ pick.source if pick else 'AI' }}" />
-        </div>
+      <div class="form-group">
+        <label>Period</label>
+        {% set current_period = pick.period if pick else 'FG' %}
+        <select name="period">
+          <option value="FG" {% if current_period == 'FG' %}selected{% endif %}>FG</option>
+        </select>
       </div>
+    </div>
 
-      <div class="row" style="margin-top:10px;">
-        <div>
-          <label>Market Type</label>
-          {% set current_market = pick.market_type if pick else 'ML' %}
-          <select name="market_type">
-            <option value="ML" {% if current_market == 'ML' %}selected{% endif %}>ML</option>
-            <option value="SPREAD" {% if current_market == 'SPREAD' %}selected{% endif %}>SPREAD</option>
-            <option value="TOTAL" {% if current_market == 'TOTAL' %}selected{% endif %}>TOTAL</option>
-          </select>
-        </div>
-        <div>
-          <label>Period</label>
-          {% set current_period = pick.period if pick else 'FG' %}
-          <select name="period">
-            <option value="FG" {% if current_period == 'FG' %}selected{% endif %}>FG</option>
-          </select>
-        </div>
+    <!-- Line & Side -->
+    <div class="form-row">
+      <div class="form-group">
+        <label>Line (Spread/Total)</label>
+        <input name="line" placeholder="2.5" value="{{ pick.line if pick and pick.line is not none else '' }}" />
       </div>
-
-      <div class="row" style="margin-top:10px;">
-        <div>
-          <label>Line (Spread/Total)</label>
-          <input name="line" placeholder="2.5" value="{{ pick.line if pick and pick.line is not none else '' }}" />
-        </div>
-        <div>
-          <label>Side</label>
-          {% set current_side = pick.side if pick else 'HOME' %}
-          <select name="side">
-            <option value="HOME" {% if current_side == 'HOME' %}selected{% endif %}>HOME</option>
-            <option value="AWAY" {% if current_side == 'AWAY' %}selected{% endif %}>AWAY</option>
-            <option value="OVER" {% if current_side == 'OVER' %}selected{% endif %}>OVER</option>
-            <option value="UNDER" {% if current_side == 'UNDER' %}selected{% endif %}>UNDER</option>
-          </select>
-        </div>
+      <div class="form-group">
+        <label>Side</label>
+        {% set current_side = pick.side if pick else 'HOME' %}
+        <select name="side">
+          <option value="HOME" {% if current_side == 'HOME' %}selected{% endif %}>HOME</option>
+          <option value="AWAY" {% if current_side == 'AWAY' %}selected{% endif %}>AWAY</option>
+          <option value="OVER" {% if current_side == 'OVER' %}selected{% endif %}>OVER</option>
+          <option value="UNDER" {% if current_side == 'UNDER' %}selected{% endif %}>UNDER</option>
+        </select>
       </div>
+    </div>
 
-      <div class="row" style="margin-top:10px;">
-        <div>
-          <label>Odds (American)</label>
-          <input name="odds" placeholder="-110" value="{{ pick.odds if pick else '' }}" />
-        </div>
-        <div>
-          <label>Stake (units)</label>
-          <input name="stake" placeholder="1" value="{{ pick.stake if pick else '1' }}" />
-        </div>
+    <!-- Odds & Stake -->
+    <div class="form-row">
+      <div class="form-group">
+        <label>Odds (American)</label>
+        <input name="odds" placeholder="-110" value="{{ pick.odds if pick else '' }}" />
       </div>
-
-      <div class="row" style="margin-top:10px;">
-        <div>
-          <label>Recommendation</label>
-          {% set current_recommendation = pick.recommendation if pick else 'BET' %}
-          <select name="recommendation">
-            <option value="BET" {% if current_recommendation == 'BET' %}selected{% endif %}>BET</option>
-            <option value="LEAN" {% if current_recommendation == 'LEAN' %}selected{% endif %}>LEAN</option>
-            <option value="PASS" {% if current_recommendation == 'PASS' %}selected{% endif %}>PASS</option>
-          </select>
-        </div>
-        <div>
-          <label>Status</label>
-          {% set current_status = pick.status if pick else 'DRAFT' %}
-          <select name="status">
-            <option value="DRAFT" {% if current_status == 'DRAFT' %}selected{% endif %}>DRAFT</option>
-            <option value="APPROVED" {% if current_status == 'APPROVED' %}selected{% endif %}>APPROVED</option>
-            <option value="VOIDED" {% if current_status == 'VOIDED' %}selected{% endif %}>VOIDED</option>
-          </select>
-        </div>
+      <div class="form-group">
+        <label>Stake (units)</label>
+        <input name="stake" placeholder="1" value="{{ pick.stake if pick else '1' }}" />
       </div>
+    </div>
 
-      <div style="margin-top:10px;">
-        <label>GPT Name (opcional)</label>
-        <input name="gpt_name" placeholder="MiGPT-Bets" value="{{ pick.gpt_name if pick else '' }}" />
+    <!-- Recommendation & Status -->
+    <div class="form-row">
+      <div class="form-group">
+        <label>Recommendation</label>
+        {% set current_recommendation = pick.recommendation if pick else 'BET' %}
+        <select name="recommendation">
+          <option value="BET" {% if current_recommendation == 'BET' %}selected{% endif %}>BET</option>
+          <option value="LEAN" {% if current_recommendation == 'LEAN' %}selected{% endif %}>LEAN</option>
+          <option value="PASS" {% if current_recommendation == 'PASS' %}selected{% endif %}>PASS</option>
+        </select>
       </div>
-
-      <div style="margin-top:10px;">
-        <label>Reasoning / Notes</label>
-        <textarea name="reasoning" placeholder="Pega aquí lo que te dijo el GPT...">{{ pick.reasoning if pick else '' }}</textarea>
+      <div class="form-group">
+        <label>Status</label>
+        {% set current_status = pick.status if pick else 'DRAFT' %}
+        <select name="status">
+          <option value="DRAFT" {% if current_status == 'DRAFT' %}selected{% endif %}>DRAFT</option>
+          <option value="APPROVED" {% if current_status == 'APPROVED' %}selected{% endif %}>APPROVED</option>
+          <option value="VOIDED" {% if current_status == 'VOIDED' %}selected{% endif %}>VOIDED</option>
+        </select>
       </div>
+    </div>
 
-      <button type="submit" style="margin-top:10px;">Guardar</button>
-    </form>
-  </div>
-</body>
-</html>
+    <!-- GPT Name -->
+    <div class="form-group">
+      <label>GPT Name (opcional)</label>
+      <input name="gpt_name" placeholder="MiGPT-Bets" value="{{ pick.gpt_name if pick else '' }}" />
+    </div>
+
+    <!-- Reasoning -->
+    <div class="form-group">
+      <label>Reasoning / Notes</label>
+      <textarea name="reasoning" placeholder="Pega aqui lo que te dijo el GPT...">{{ pick.reasoning if pick else '' }}</textarea>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions-row mt-1">
+      <button type="submit" class="btn btn-primary">Guardar</button>
+      <a href="/events/today" class="btn btn-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

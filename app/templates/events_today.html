@@ -1,92 +1,115 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Partidos del día</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; }
-    input, select { width: 100%; padding: 8px; }
-    button { padding: 8px 10px; cursor:pointer; }
-    .actions { display:flex; gap: 8px; align-items: center; }
-    a { color: #0b5; text-decoration: none; }
-    .muted { color:#666; font-size: 12px; }
-  </style>
-</head>
-<body>
-  <h1>Partidos del día</h1>
-  <p class="muted">{{ start_day.strftime('%Y-%m-%d') }} (timezone local)</p>
-  <div class="actions" style="margin-bottom: 12px;">
-    <a href="/">Ir a home</a>
-    <a href="/events/new">Crear Event manual</a>
-  </div>
+{% extends "base.html" %}
+{% block title %}Partidos del dia — Bet Tracker{% endblock %}
 
-  <div class="card" style="margin-bottom: 16px;">
-    <form method="get" action="/events/today">
-      <div class="row">
-        <div>
-          <label>Sport</label>
-          <select name="sport">
-            <option value="">Todos</option>
-            {% for s in sports %}
-              <option value="{{ s }}" {% if selected_sport == s %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label>League</label>
-          <select name="league">
-            <option value="">Todas</option>
-            {% for l in leagues %}
-              <option value="{{ l }}" {% if selected_league == l %}selected{% endif %}>{{ l }}</option>
-            {% endfor %}
-          </select>
-        </div>
+{% block content %}
+<div class="page-header">
+  <h1>Partidos del dia</h1>
+  <p class="subtitle">{{ start_day.strftime('%Y-%m-%d') }} (timezone local)</p>
+</div>
+
+<div class="breadcrumb">
+  <a href="/">Dashboard</a>
+  <span class="sep">/</span>
+  <span>Partidos</span>
+</div>
+
+<!-- Filters -->
+<div class="card mb-3" style="max-width:700px;">
+  <form method="get" action="/events/today">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Sport</label>
+        <select name="sport">
+          <option value="">Todos</option>
+          {% for s in sports %}
+            <option value="{{ s }}" {% if selected_sport == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
       </div>
-      <button type="submit" style="margin-top:10px;">Filtrar</button>
-    </form>
-  </div>
+      <div class="form-group">
+        <label>League</label>
+        <select name="league">
+          <option value="">Todas</option>
+          {% for l in leagues %}
+            <option value="{{ l }}" {% if selected_league == l %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="actions-row mt-1">
+      <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
+      <a href="/events/new" class="btn btn-outline btn-sm">Crear Event manual</a>
+    </div>
+  </form>
+</div>
 
-  <div class="card">
+<!-- Games List -->
+<div class="card">
+  <div class="card-header">
+    <h3>Juegos</h3>
+    <span class="badge badge-draft">{{ events|length }}</span>
+  </div>
+  <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Event</th>
+          <th>Evento</th>
           <th>Hora</th>
           <th>Status</th>
-          <th>Acciones</th>
+          <th style="text-align:right;">Acciones</th>
         </tr>
       </thead>
       <tbody>
         {% for e in events %}
         <tr>
           <td>
-            <div><b>{{ e.sport }} {{ e.league }}</b></div>
-            <div>{{ e.home_team }} vs {{ e.away_team }}</div>
+            <div class="flex items-center gap-1 mb-1">
+              <span class="league-badge {{ e.league|lower if e.league else '' }}">
+                {% set ll = league_logo_url(e.league) if e.league else '' %}
+                {% if ll %}<img src="{{ ll }}" alt="" />{% endif %}
+                {{ e.league or e.sport }}
+              </span>
+            </div>
+            <div class="matchup">
+              {% set home_logo = team_logo_url(e.home_team) %}
+              {% set away_logo = team_logo_url(e.away_team) %}
+              {% if home_logo %}
+                <img src="{{ home_logo }}" alt="" class="team-logo sm" />
+              {% endif %}
+              <span class="team-name">{{ e.home_team }}</span>
+              <span class="vs-divider">vs</span>
+              {% if away_logo %}
+                <img src="{{ away_logo }}" alt="" class="team-logo sm" />
+              {% endif %}
+              <span class="team-name">{{ e.away_team }}</span>
+            </div>
           </td>
           <td>
             {% if e.start_time %}
-              {{ e.start_time.strftime('%H:%M') }}
+              <span class="font-bold">{{ e.start_time.strftime('%H:%M') }}</span>
             {% else %}
-              -
+              <span class="text-muted">-</span>
             {% endif %}
           </td>
-          <td>{{ e.status }}</td>
           <td>
-            <a href="/events/{{ e.id }}">Detalle</a>
-            <a href="/picks/new?event_id={{ e.id }}">Create Pick</a>
+            <span class="badge badge-{% if e.status == 'FINAL' %}bet{% elif e.status == 'IN_PROGRESS' %}lean{% elif e.status == 'SCHEDULED' %}approved{% else %}draft{% endif %}">
+              {{ e.status }}
+            </span>
+          </td>
+          <td style="text-align:right;">
+            <div class="actions-row" style="justify-content:flex-end;">
+              <a href="/events/{{ e.id }}" class="btn btn-outline btn-sm">Detalle</a>
+              <a href="/picks/new?event_id={{ e.id }}" class="btn btn-secondary btn-sm">Pick</a>
+            </div>
           </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="4" class="muted">No hay eventos para hoy con esos filtros.</td>
+          <td colspan="4" class="table-empty">No hay eventos para hoy con esos filtros.</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-</body>
-</html>
+</div>
+{% endblock %}

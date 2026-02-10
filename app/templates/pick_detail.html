@@ -1,102 +1,134 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Detalle Pick</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; max-width: 860px; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .muted { color:#666; font-size: 12px; }
-    .pill { padding: 4px 8px; border-radius: 999px; border: 1px solid #ddd; display: inline-block; }
-    .errors { background: #ffecec; border: 1px solid #ffb3b3; padding: 10px; border-radius: 8px; margin-bottom: 12px; }
-    button { padding: 8px 10px; cursor:pointer; }
-    a { color: #0b5; text-decoration: none; }
-    .actions { display:flex; gap: 8px; align-items: center; }
-  </style>
-</head>
-<body>
-  <h1>Detalle Pick</h1>
-  <p>
-    <a href="/">← Volver a home</a>
-    | <a href="/events/today">Partidos del día</a>
-  </p>
+{% extends "base.html" %}
+{% block title %}Detalle Pick — Bet Tracker{% endblock %}
 
-  {% if errors %}
-    <div class="errors">
+{% block content %}
+<div class="page-header">
+  <h1>Detalle del Pick</h1>
+</div>
+
+<div class="breadcrumb">
+  <a href="/">Dashboard</a>
+  <span class="sep">/</span>
+  <a href="/events/today">Partidos</a>
+  <span class="sep">/</span>
+  <span>Pick #{{ pick.id }}</span>
+</div>
+
+{% if errors %}
+  <div class="notice notice-error">
+    <div>
       <strong>No se pudo aprobar:</strong>
-      <ul>
+      <ul style="margin:6px 0 0 16px;">
         {% for error in errors %}
           <li>{{ error }}</li>
         {% endfor %}
       </ul>
     </div>
-  {% endif %}
+  </div>
+{% endif %}
 
-  <div class="card">
-    <div class="row">
+<div class="card" style="max-width:860px;">
+  <!-- Event Info -->
+  <div class="detail-grid mb-2">
+    <div class="detail-item">
+      <span class="detail-label">Evento</span>
       <div>
-        <div class="muted">Event</div>
-        <div>
-          {% if pick.event %}
-            <b>{{ pick.event.sport }} {{ pick.event.league }}</b> — {{ pick.event.home_team }} vs {{ pick.event.away_team }}
-          {% else %}
-            (Sin Event)
-          {% endif %}
-        </div>
-      </div>
-      <div>
-        <div class="muted">Status</div>
-        <div class="pill">{{ pick.status }}</div>
+        {% if pick.event %}
+          <div class="flex items-center gap-1 mb-1">
+            <span class="league-badge {{ pick.event.league|lower if pick.event.league else '' }}">
+              {% set ll = league_logo_url(pick.event.league) if pick.event.league else '' %}
+              {% if ll %}<img src="{{ ll }}" alt="" />{% endif %}
+              {{ pick.event.sport }} {{ pick.event.league }}
+            </span>
+          </div>
+          <div class="matchup">
+            {% set home_logo = team_logo_url(pick.event.home_team) %}
+            {% set away_logo = team_logo_url(pick.event.away_team) %}
+            {% if home_logo %}
+              <img src="{{ home_logo }}" alt="" class="team-logo" style="width:36px;height:36px;" />
+            {% endif %}
+            <span class="team-name">{{ pick.event.home_team }}</span>
+            <span class="vs-divider">vs</span>
+            {% if away_logo %}
+              <img src="{{ away_logo }}" alt="" class="team-logo" style="width:36px;height:36px;" />
+            {% endif %}
+            <span class="team-name">{{ pick.event.away_team }}</span>
+          </div>
+        {% else %}
+          <span class="text-muted">(Sin Event)</span>
+        {% endif %}
       </div>
     </div>
-
-    <div class="row" style="margin-top:12px;">
-      <div>
-        <div class="muted">Market</div>
-        <div>{{ pick.market_type }} {{ pick.side }}{% if pick.line is not none %} {{ pick.line }}{% endif %} — {{ pick.period }}</div>
-      </div>
-      <div>
-        <div class="muted">Odds / Stake</div>
-        <div>{{ pick.odds }} / {{ pick.stake }}u</div>
-      </div>
-    </div>
-
-    <div class="row" style="margin-top:12px;">
-      <div>
-        <div class="muted">Sportsbook</div>
-        <div>{{ pick.sportsbook }}</div>
-      </div>
-      <div>
-        <div class="muted">Recommendation</div>
-        <div>{{ pick.recommendation }}</div>
-      </div>
-    </div>
-
-    <div class="row" style="margin-top:12px;">
-      <div>
-        <div class="muted">Source</div>
-        <div>{{ pick.source }}{% if pick.gpt_name %} ({{ pick.gpt_name }}){% endif %}</div>
-      </div>
-      <div>
-        <div class="muted">Resultado</div>
-        <div>{{ pick.result }}</div>
-      </div>
-    </div>
-
-    {% if pick.reasoning %}
-      <div style="margin-top:12px;">
-        <div class="muted">Reasoning</div>
-        <div style="white-space: pre-wrap;">{{ pick.reasoning }}</div>
-      </div>
-    {% endif %}
-
-    <div class="actions" style="margin-top:16px;">
-      <a href="/picks/{{ pick.id }}/edit">Edit</a>
-      <form method="post" action="/picks/{{ pick.id }}/approve">
-        <button type="submit">Approve</button>
-      </form>
+    <div class="detail-item">
+      <span class="detail-label">Status</span>
+      <span class="badge badge-{% if pick.status == 'APPROVED' %}approved{% elif pick.status == 'VOIDED' %}voided{% else %}draft{% endif %}">
+        {{ pick.status }}
+      </span>
     </div>
   </div>
-</body>
-</html>
+
+  <!-- Market Info -->
+  <div class="detail-grid mb-2" style="padding-top:16px;border-top:1px solid var(--border-light);">
+    <div class="detail-item">
+      <span class="detail-label">Market</span>
+      <span class="detail-value">{{ pick.market_type }} {{ pick.side }}{% if pick.line is not none %} {{ pick.line }}{% endif %} — {{ pick.period }}</span>
+    </div>
+    <div class="detail-item">
+      <span class="detail-label">Odds / Stake</span>
+      <span class="detail-value text-mono">{{ pick.odds }} / {{ pick.stake }}u</span>
+    </div>
+  </div>
+
+  <!-- Source & Recommendation -->
+  <div class="detail-grid mb-2" style="padding-top:16px;border-top:1px solid var(--border-light);">
+    <div class="detail-item">
+      <span class="detail-label">Sportsbook</span>
+      <span class="detail-value">{{ pick.sportsbook }}</span>
+    </div>
+    <div class="detail-item">
+      <span class="detail-label">Recommendation</span>
+      {% if pick.recommendation == 'BET' %}
+        <span class="badge badge-bet">BET</span>
+      {% elif pick.recommendation == 'LEAN' %}
+        <span class="badge badge-lean">LEAN</span>
+      {% else %}
+        <span class="badge badge-no-bet">{{ pick.recommendation }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Source & Result -->
+  <div class="detail-grid" style="padding-top:16px;border-top:1px solid var(--border-light);">
+    <div class="detail-item">
+      <span class="detail-label">Source</span>
+      <span class="detail-value">{{ pick.source }}{% if pick.gpt_name %} ({{ pick.gpt_name }}){% endif %}</span>
+    </div>
+    <div class="detail-item">
+      <span class="detail-label">Resultado</span>
+      {% if pick.result %}
+        <span class="badge badge-{% if pick.result == 'WIN' %}bet{% elif pick.result == 'LOSS' %}no-bet{% else %}lean{% endif %}">
+          {{ pick.result }}
+        </span>
+      {% else %}
+        <span class="text-muted">-</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Reasoning -->
+  {% if pick.reasoning %}
+    <div class="analysis-section mt-2">
+      <div class="section-title">Reasoning</div>
+      <div class="content">{{ pick.reasoning }}</div>
+    </div>
+  {% endif %}
+
+  <!-- Actions -->
+  <div class="actions-row mt-3">
+    <a href="/picks/{{ pick.id }}/edit" class="btn btn-outline btn-sm">Editar</a>
+    <form method="post" action="/picks/{{ pick.id }}/approve" style="margin:0;">
+      <button type="submit" class="btn btn-primary btn-sm">Approve</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

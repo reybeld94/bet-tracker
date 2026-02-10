@@ -1,77 +1,73 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Ingesta GPT — Bet Tracker</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
-    textarea { width: 100%; height: 140px; }
-    input, select { width: 100%; padding: 8px; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .muted { color:#666; font-size: 12px; }
-    .error { color:#c33; font-weight: 700; }
-    .actions { display:flex; gap: 8px; }
-    button { padding: 8px 10px; cursor:pointer; }
-  </style>
-</head>
-<body>
-  <h1>Ingesta “pega el output del GPT”</h1>
-  <p class="muted">Pega el análisis y genera picks en estado DRAFT. No se aprueba nada automáticamente.</p>
+{% extends "base.html" %}
+{% block title %}Ingesta GPT — Bet Tracker{% endblock %}
 
+{% block content %}
+<div class="page-header">
+  <h1>Ingesta GPT</h1>
+  <p class="subtitle">Pega el analisis y genera picks en estado DRAFT. No se aprueba nada automaticamente.</p>
+</div>
+
+<div class="breadcrumb">
+  <a href="/">Dashboard</a>
+  <span class="sep">/</span>
+  <span>Ingesta</span>
+</div>
+
+<div class="card mb-3">
+  <form method="post" action="/ingest">
+    <div class="form-group">
+      <label>Pega aqui el texto del GPT</label>
+      <textarea name="text" placeholder="Bucks +1.5 -130 1u" style="min-height:140px;">{{ text }}</textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Sport (opcional)</label>
+        <select name="sport">
+          <option value="">(Todos)</option>
+          {% for s in sports %}
+            <option value="{{ s }}" {% if s == selected_sport %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>League (opcional)</label>
+        <select name="league">
+          <option value="">(Todas)</option>
+          {% for l in leagues %}
+            <option value="{{ l }}" {% if l == selected_league %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>GPT Name (opcional)</label>
+        <input name="gpt_name" placeholder="MiGPT-Bets" value="{{ gpt_name }}" />
+      </div>
+      <div class="form-group">
+        <label>Source</label>
+        <input name="source" placeholder="AI" value="{{ source }}" />
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Parse</button>
+  </form>
+</div>
+
+{% if picks %}
   <div class="card">
-    <form method="post" action="/ingest">
-      <div style="margin-bottom:10px;">
-        <label>Pega aquí el texto del GPT</label>
-        <textarea name="text" placeholder="Bucks +1.5 -130 1u">{{ text }}</textarea>
-      </div>
+    <div class="card-header">
+      <h3>Review de picks propuestos</h3>
+      <span class="badge badge-draft">{{ picks|length }}</span>
+    </div>
+    <form method="post" action="/ingest/create">
+      <input type="hidden" name="pick_count" value="{{ picks|length }}" />
+      <input type="hidden" name="gpt_name" value="{{ gpt_name }}" />
+      <input type="hidden" name="source" value="{{ source }}" />
 
-      <div class="row" style="margin-bottom:10px;">
-        <div>
-          <label>Sport (opcional)</label>
-          <select name="sport">
-            <option value="">(Todos)</option>
-            {% for s in sports %}
-              <option value="{{ s }}" {% if s == selected_sport %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label>League (opcional)</label>
-          <select name="league">
-            <option value="">(Todas)</option>
-            {% for l in leagues %}
-              <option value="{{ l }}" {% if l == selected_league %}selected{% endif %}>{{ l }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-
-      <div class="row" style="margin-bottom:10px;">
-        <div>
-          <label>GPT Name (opcional)</label>
-          <input name="gpt_name" placeholder="MiGPT-Bets" value="{{ gpt_name }}" />
-        </div>
-        <div>
-          <label>Source</label>
-          <input name="source" placeholder="AI" value="{{ source }}" />
-        </div>
-      </div>
-
-      <button type="submit">Parse</button>
-    </form>
-  </div>
-
-  {% if picks %}
-    <div class="card">
-      <h2>Review de picks propuestos</h2>
-      <form method="post" action="/ingest/create">
-        <input type="hidden" name="pick_count" value="{{ picks|length }}" />
-        <input type="hidden" name="gpt_name" value="{{ gpt_name }}" />
-        <input type="hidden" name="source" value="{{ source }}" />
-
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -89,7 +85,7 @@
             {% for pick in picks %}
               <tr>
                 <td>
-                  <select name="pick-{{ loop.index0 }}-event_id">
+                  <select name="pick-{{ loop.index0 }}-event_id" style="min-width:160px;">
                     <option value="">(Sin evento)</option>
                     {% for event in events %}
                       <option value="{{ event.id }}" {% if event.id == pick.event_id %}selected{% endif %}>
@@ -98,7 +94,7 @@
                     {% endfor %}
                   </select>
                   {% if pick.error %}
-                    <div class="error">{{ pick.error }}</div>
+                    <div style="color:var(--accent-red);font-weight:700;font-size:0.8rem;margin-top:4px;">{{ pick.error }}</div>
                   {% endif %}
                 </td>
                 <td>
@@ -118,9 +114,9 @@
                     <option value="UNDER" {% if pick.side == "UNDER" %}selected{% endif %}>UNDER</option>
                   </select>
                 </td>
-                <td><input name="pick-{{ loop.index0 }}-line" value="{{ pick.line if pick.line is not none else '' }}" /></td>
-                <td><input name="pick-{{ loop.index0 }}-odds" value="{{ pick.odds }}" /></td>
-                <td><input name="pick-{{ loop.index0 }}-stake" value="{{ pick.stake }}" /></td>
+                <td><input name="pick-{{ loop.index0 }}-line" value="{{ pick.line if pick.line is not none else '' }}" style="width:60px;" /></td>
+                <td><input name="pick-{{ loop.index0 }}-odds" value="{{ pick.odds }}" style="width:70px;" /></td>
+                <td><input name="pick-{{ loop.index0 }}-stake" value="{{ pick.stake }}" style="width:50px;" /></td>
                 <td>
                   <select name="pick-{{ loop.index0 }}-recommendation">
                     <option value="BET" {% if pick.recommendation == "BET" %}selected{% endif %}>BET</option>
@@ -129,18 +125,18 @@
                   </select>
                 </td>
                 <td>
-                  <input name="pick-{{ loop.index0 }}-reasoning" value="{{ pick.raw_line }}" />
+                  <input name="pick-{{ loop.index0 }}-reasoning" value="{{ pick.raw_line }}" style="min-width:120px;" />
                 </td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
+      </div>
 
-        <div style="margin-top:10px;">
-          <button type="submit">Create Drafts</button>
-        </div>
-      </form>
-    </div>
-  {% endif %}
-</body>
-</html>
+      <div class="mt-2">
+        <button type="submit" class="btn btn-primary">Create Drafts</button>
+      </div>
+    </form>
+  </div>
+{% endif %}
+{% endblock %}
