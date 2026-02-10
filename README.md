@@ -56,6 +56,48 @@ uvicorn app.main:app --reload
 
 Visita: http://127.0.0.1:8000
 
+## Auto-picks (cola + worker)
+
+Variables recomendadas:
+- `APP_ADMIN_PASSWORD`: password simple para acceder a `/ui/settings` (requerido).
+- `APP_SECRET_KEY`: clave para encriptar el API key (Fernet, base64). Si no existe, se genera una temporal y se loguea.
+
+### Flujo completo
+
+Migraciones:
+
+```bash
+alembic upgrade head
+```
+
+Ingesta (ya existe):
+
+```bash
+python -m app.ingestion.run --today --leagues NBA,NHL
+```
+
+Enqueue jobs:
+
+```bash
+python -m app.picks.enqueue --today --leagues NBA,NHL
+```
+
+Worker:
+
+```bash
+python -m app.picks.worker
+```
+
+App:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+UI:
+
+Abrir http://127.0.0.1:8000/ui/settings?admin_password=TU_PASSWORD para pegar el token y configurar.
+
 ## Ingesta automática (programable)
 
 Forma recomendada (un comando):

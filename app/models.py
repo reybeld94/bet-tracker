@@ -1,6 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, UniqueConstraint, Boolean
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
 from .db import Base
 
 class Event(Base):
@@ -27,7 +26,6 @@ class Event(Base):
         onupdate=func.now(),
     )
 
-    picks = relationship("Pick", back_populates="event")
 
 
 class Game(Base):
@@ -55,37 +53,67 @@ class Game(Base):
         onupdate=func.now(),
     )
 
-class Pick(Base):
-    __tablename__ = "picks"
+class AppSettings(Base):
+    __tablename__ = "app_settings"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
+    openai_api_key_enc = Column(Text, nullable=True)
+    openai_model = Column(String, nullable=False, default="gpt-5")
+    openai_reasoning_effort = Column(String, nullable=False, default="high")
+    auto_picks_enabled = Column(Boolean, nullable=False, default=True)
+    auto_picks_concurrency = Column(Integer, nullable=False, default=2)
+    auto_picks_poll_seconds = Column(Integer, nullable=False, default=30)
+    auto_picks_max_retries = Column(Integer, nullable=False, default=2)
+    allow_totals_default = Column(Boolean, nullable=False, default=False)
+    updated_at_utc = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # Info del pick
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
-    sportsbook = Column(String, default="")
-    market_type = Column(String, default="")
-    period = Column(String, default="FG")
-    line = Column(Float, nullable=True)
-    side = Column(String, default="")
-    odds = Column(Float, default=0.0)            # -110 -> -110.0, +120 -> 120.0
-    stake = Column(Float, default=0.0)           # unidades (1.0 = 1u)
-    recommendation = Column(String, default="")
-    status = Column(String, default="DRAFT")
 
-    # IA / origen
-    source = Column(String, default="AI")        # "AI", "Manual", "Friend", etc.
-    gpt_name = Column(String, default="")        # nombre de tu GPT (si quieres)
-    reasoning = Column(Text, default="")         # explicación / texto del GPT
-
-    # Resultado
-    result = Column(String, default="PENDING")   # PENDING | WON | LOST | PUSH
-    profit = Column(Float, default=0.0)          # en unidades (se calcula al cerrar)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+class PickJob(Base):
+    __tablename__ = "pick_jobs"
+    __table_args__ = (
+        UniqueConstraint("game_id", name="uq_pick_jobs_game_id"),
     )
 
-    event = relationship("Event", back_populates="picks")
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    run_at_utc = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, nullable=False, default="queued")
+    attempts = Column(Integer, nullable=False, default=0)
+    locked_at_utc = Column(DateTime(timezone=True), nullable=True)
+    lock_owner = Column(String, nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at_utc = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at_utc = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Pick(Base):
+    __tablename__ = "picks"
+    __table_args__ = (
+        UniqueConstraint("game_id", name="uq_picks_game_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    result = Column(String, nullable=False, default="NO_BET")
+    market = Column(String, nullable=True)
+    emoji = Column(String, nullable=False, default="")
+    selection = Column(String, nullable=True)
+    line = Column(Float, nullable=True)
+    odds_format = Column(String, nullable=True)
+    odds = Column(Float, nullable=True)
+    p_est = Column(Float, nullable=False, default=0.0)
+    p_implied = Column(Float, nullable=True)
+    ev = Column(Float, nullable=True)
+    confidence = Column(Integer, nullable=False, default=0)
+    stake_u = Column(Float, nullable=False, default=0.0)
+    high_prob_low_payout = Column(Boolean, nullable=False, default=False)
+    is_value = Column(Boolean, nullable=False, default=False)
+    reasons_json = Column(Text, nullable=False, default="[]")
+    risks_json = Column(Text, nullable=False, default="[]")
+    triggers_json = Column(Text, nullable=False, default="[]")
+    missing_data_json = Column(Text, nullable=False, default="[]")
+    as_of_utc = Column(String, nullable=False, default="")
+    notes = Column(Text, nullable=False, default="")
+    raw_ai_json = Column(Text, nullable=False, default="")
+    created_at_utc = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at_utc = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

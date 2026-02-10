@@ -2,38 +2,49 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
-class PickCreate(BaseModel):
-    event_id: Optional[int] = None
-    sportsbook: str = ""
-    market_type: str = ""
-    period: str = "FG"
-    line: Optional[float] = None
-    side: str = ""
-    odds: float = 0.0
-    stake: float = 0.0
-    recommendation: str = ""
-    status: str = "DRAFT"
-    source: str = "AI"
-    gpt_name: str = ""
-    reasoning: str = ""
 
 class PickOut(BaseModel):
     id: int
-    event_id: Optional[int]
-    sportsbook: str
-    market_type: str
-    period: str
-    line: Optional[float]
-    side: str
-    odds: float
-    stake: float
-    recommendation: str
-    status: str
-    source: str
-    gpt_name: str
-    reasoning: str
+    game_id: int
     result: str
-    profit: float
+    market: Optional[str]
+    emoji: str
+    selection: Optional[str]
+    line: Optional[float]
+    odds_format: Optional[str]
+    odds: Optional[float]
+    p_est: float
+    p_implied: Optional[float]
+    ev: Optional[float]
+    confidence: int
+    stake_u: float
+    high_prob_low_payout: bool
+    is_value: bool
+    reasons_json: str
+    risks_json: str
+    triggers_json: str
+    missing_data_json: str
+    as_of_utc: str
+    notes: str
+    raw_ai_json: str
+    created_at_utc: Optional[datetime]
+    updated_at_utc: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class PickJobOut(BaseModel):
+    id: int
+    game_id: int
+    run_at_utc: datetime
+    status: str
+    attempts: int
+    locked_at_utc: Optional[datetime]
+    lock_owner: Optional[str]
+    last_error: Optional[str]
+    created_at_utc: Optional[datetime]
+    updated_at_utc: Optional[datetime]
 
     class Config:
         from_attributes = True

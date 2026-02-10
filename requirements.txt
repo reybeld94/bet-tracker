@@ -5,3 +5,5 @@ alembic
 jinja2
 python-multipart
 tzdata
+requests
+cryptography
