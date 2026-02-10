@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.ingestion.leagues import LEAGUE_PATHS
-from app.models import Game, PickJob
+from app.models import Game, Pick, PickJob
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,13 @@ def _utc_day_range(day: date) -> tuple[datetime, datetime]:
 def _enqueue_for_game(db: Session, game: Game) -> bool:
     if not game.start_time_utc:
         return False
+    if game.status.lower() not in {"scheduled", "in_progress"}:
+        return False
     existing = db.query(PickJob).filter(PickJob.game_id == game.id).one_or_none()
     if existing:
+        return False
+    existing_pick = db.query(Pick).filter(Pick.game_id == game.id).one_or_none()
+    if existing_pick is not None:
         return False
     run_at = game.start_time_utc - timedelta(hours=2)
     now = datetime.now(timezone.utc)
@@ -58,6 +63,27 @@ def enqueue_for_date(target_date: date, leagues: list[str]) -> int:
             Game.start_time_utc.isnot(None),
             Game.start_time_utc >= start_utc,
             Game.start_time_utc < end_utc,
+        )
+        if leagues:
+            query = query.filter(Game.league.in_(leagues))
+        games = query.order_by(Game.start_time_utc.asc()).all()
+        for game in games:
+            if _enqueue_for_game(db, game):
+                created += 1
+        db.commit()
+    return created
+
+
+def enqueue_due_games(leagues: list[str], horizon_hours: int = 2) -> int:
+    """Enqueue unanalyzed games starting within horizon hours (or sooner)."""
+    now = datetime.now(timezone.utc)
+    horizon = now + timedelta(hours=horizon_hours)
+    created = 0
+    with SessionLocal() as db:
+        query = db.query(Game).filter(
+            Game.start_time_utc.isnot(None),
+            Game.start_time_utc <= horizon,
+            Game.status.in_(["scheduled", "in_progress"]),
         )
         if leagues:
             query = query.filter(Game.league.in_(leagues))

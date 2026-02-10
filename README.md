@@ -76,7 +76,7 @@ Ingesta (ya existe):
 python -m app.ingestion.run --today --leagues NBA,NHL
 ```
 
-Enqueue jobs:
+Enqueue jobs (opcional/manual):
 
 ```bash
 python -m app.picks.enqueue --today --leagues NBA,NHL
@@ -130,20 +130,19 @@ Ejemplo cada 15 minutos:
 
 ## Auto-ingesta al levantar la app
 
-Si prefieres que la app sincronice sola al iniciar, puedes activar la auto-ingesta
-con variables de entorno al ejecutar Uvicorn:
+La app ejecuta auto-ingesta siempre al iniciar y, tras cada ciclo, encola automáticamente
+partidos pendientes cuya hora de inicio sea en <= 2 horas (o que ya pasaron esa ventana)
+para que el worker los procese sin pasos manuales.
+
+Variables útiles:
+- `AUTO_INGEST_LEAGUES`: lista de ligas separadas por coma.
+- `AUTO_INGEST_INTERVAL_MINUTES`: cada cuántos minutos se re-sincroniza (mínimo 1).
 
 ```bash
-AUTO_INGEST_ENABLED=true \
 AUTO_INGEST_LEAGUES=NBA,NHL \
 AUTO_INGEST_INTERVAL_MINUTES=15 \
 uvicorn app.main:app --reload
 ```
-
-Notas:
-- `AUTO_INGEST_ENABLED`: habilita la ingesta periódica.
-- `AUTO_INGEST_LEAGUES`: lista de ligas separadas por coma.
-- `AUTO_INGEST_INTERVAL_MINUTES`: cada cuántos minutos se re-sincroniza (mínimo 1).
 
 ## ESPN Scoreboard (endpoint y base URL)
 

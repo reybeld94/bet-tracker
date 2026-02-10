@@ -97,6 +97,13 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
             if not game:
                 raise RuntimeError("Game not found for job.")
 
+            existing_pick = db.query(Pick).filter(Pick.game_id == job.game_id).one_or_none()
+            if existing_pick is not None:
+                job.status = "done"
+                job.updated_at_utc = _utcnow()
+                db.commit()
+                return
+
             payload = build_game_payload(game, settings_snapshot)
             ai_payload, raw_ai_json = request_pick(payload, settings_snapshot)
 
@@ -116,12 +123,9 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
             job.attempts += 1
             job.last_error = str(exc)
             job.updated_at_utc = _utcnow()
-            if job.attempts <= settings_snapshot.auto_picks_max_retries:
-                job.status = "queued"
-                job.locked_at_utc = None
-                job.lock_owner = None
-            else:
-                job.status = "failed"
+            job.status = "failed"
+            job.locked_at_utc = None
+            job.lock_owner = None
             db.commit()
 
 
@@ -139,10 +143,6 @@ async def run_worker() -> None:
         with SessionLocal() as db:
             settings = get_or_create_settings(db)
             settings_snapshot = snapshot_settings(settings)
-
-        if not settings_snapshot.auto_picks_enabled:
-            await asyncio.sleep(settings_snapshot.auto_picks_poll_seconds)
-            continue
 
         job_ids = _claim_jobs(settings_snapshot.auto_picks_concurrency, lock_owner)
         if not job_ids:
