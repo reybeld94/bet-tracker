@@ -23,6 +23,17 @@ def _utcnow() -> datetime:
 def _claim_jobs(concurrency: int, lock_owner: str) -> list[int]:
     now = _utcnow()
     with SessionLocal() as db:
+        # Count total queued jobs for visibility
+        total_queued = db.query(PickJob).filter(PickJob.status == "queued").count()
+        eligible = db.query(PickJob).filter(
+            PickJob.status == "queued",
+            PickJob.run_at_utc <= now,
+        ).count()
+        logger.debug(
+            "Job check: total_queued=%d eligible_now=%d (concurrency=%d)",
+            total_queued, eligible, concurrency,
+        )
+
         jobs = (
             db.query(PickJob)
             .filter(
@@ -41,6 +52,8 @@ def _claim_jobs(concurrency: int, lock_owner: str) -> list[int]:
             job.updated_at_utc = now
             job_ids.append(job.id)
         db.commit()
+        if job_ids:
+            logger.info("Claimed %d job(s): %s", len(job_ids), job_ids)
     return job_ids
 
 
@@ -87,35 +100,49 @@ def _upsert_pick(db, game_id: int, ai_payload: dict, raw_ai_json: str) -> None:
 
 
 def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
+    logger.info("Processing job #%d ...", job_id)
     with SessionLocal() as db:
         job = db.query(PickJob).filter(PickJob.id == job_id).one_or_none()
         if not job or job.status != "running" or job.lock_owner != lock_owner:
+            logger.warning("Job #%d: skipped (status=%s, owner=%s)",
+                           job_id, job.status if job else "N/A", job.lock_owner if job else "N/A")
             return
 
         try:
             game = db.query(Game).filter(Game.id == job.game_id).one_or_none()
             if not game:
                 raise RuntimeError("Game not found for job.")
+            logger.info("Job #%d: game=%s vs %s (%s) start=%s",
+                        job_id, game.home_team, game.away_team, game.league,
+                        game.start_time_utc)
 
             existing_pick = db.query(Pick).filter(Pick.game_id == job.game_id).one_or_none()
             if existing_pick is not None:
+                logger.info("Job #%d: pick already exists for game #%d, marking done", job_id, job.game_id)
                 job.status = "done"
                 job.updated_at_utc = _utcnow()
                 db.commit()
                 return
 
+            logger.info("Job #%d: calling OpenAI (model=%s, effort=%s) ...",
+                        job_id, settings_snapshot.openai_model, settings_snapshot.openai_reasoning_effort)
             payload = build_game_payload(game, settings_snapshot)
             ai_payload, raw_ai_json = request_pick(payload, settings_snapshot)
 
             if payload["odds"] is None:
+                logger.info("Job #%d: no odds available, coercing to NO_BET", job_id)
                 ai_payload = _coerce_no_odds(ai_payload)
 
             _upsert_pick(db, game.id, ai_payload, raw_ai_json)
+            logger.info("Job #%d: pick saved -> result=%s market=%s confidence=%s ev=%s",
+                        job_id, ai_payload.get("result"), ai_payload.get("market"),
+                        ai_payload.get("confidence"), ai_payload.get("ev"))
 
             job.status = "done"
             job.updated_at_utc = _utcnow()
             db.commit()
         except Exception as exc:
+            logger.error("Job #%d FAILED: %s", job_id, exc, exc_info=True)
             db.rollback()
             job = db.query(PickJob).filter(PickJob.id == job_id).one_or_none()
             if not job:
@@ -162,14 +189,27 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
     hostname = socket.gethostname()
     pid = os.getpid()
     lock_owner = f"{hostname}:{pid}"
+    logger.info("Worker started (lock_owner=%s)", lock_owner)
 
     while not stop_event.is_set():
         with SessionLocal() as db:
             settings = get_or_create_settings(db)
             settings_snapshot = snapshot_settings(settings)
+            has_key = bool(settings_snapshot.openai_api_key_enc)
+
+        if not has_key:
+            logger.warning("Worker poll: no OpenAI API key configured — skipping")
+        else:
+            logger.debug(
+                "Worker poll: api_key=configured model=%s concurrency=%d poll=%ds",
+                settings_snapshot.openai_model,
+                settings_snapshot.auto_picks_concurrency,
+                settings_snapshot.auto_picks_poll_seconds,
+            )
 
         job_ids = _claim_jobs(settings_snapshot.auto_picks_concurrency, lock_owner)
         if not job_ids:
+            logger.debug("No eligible jobs, sleeping %ds ...", settings_snapshot.auto_picks_poll_seconds)
             try:
                 await asyncio.wait_for(
                     stop_event.wait(),
@@ -185,6 +225,7 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
             for job_id in job_ids
         ]
         await asyncio.gather(*tasks)
+    logger.info("Worker stopped.")
 
 
 def main() -> None:

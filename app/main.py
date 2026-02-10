@@ -18,6 +18,7 @@ from app.ingestion.espn_client import fetch_scoreboard, normalize_dates
 from app.ingestion.leagues import LEAGUE_PATHS
 from app.ingestion.espn_parser import parse_scoreboard
 from app.ingestion.sync import sync_games_for_date
+from app.log_buffer import install_buffer_handler, get_buffer_handler
 from app.models import Game, Pick, PickJob
 from app.picks.enqueue import enqueue_due_games
 from app.picks.worker import run_worker_with_shutdown
@@ -95,6 +96,8 @@ async def _auto_ingest_loop(interval_minutes: int, leagues: list[str]) -> None:
 @app.on_event("startup")
 async def start_auto_ingest() -> None:
     global _auto_ingest_task, _auto_ingest_stop, _auto_worker_task, _auto_worker_stop
+    install_buffer_handler()
+    logger.info("App starting up — initializing auto-ingest and worker")
     interval_minutes = int(os.getenv("AUTO_INGEST_INTERVAL_MINUTES", "15"))
     leagues_raw = os.getenv("AUTO_INGEST_LEAGUES", "NBA,NHL")
     leagues = _parse_auto_ingest_leagues(leagues_raw)
@@ -144,6 +147,21 @@ def home(request: Request, db: Session = Depends(get_db)):
         "no_bet": sum(1 for pick in picks if pick.result == "NO_BET"),
     }
 
+    # Job stats for the activity log panel
+    total_games = db.query(Game).count()
+    jobs_queued = db.query(PickJob).filter(PickJob.status == "queued").count()
+    jobs_running = db.query(PickJob).filter(PickJob.status == "running").count()
+    jobs_done = db.query(PickJob).filter(PickJob.status == "done").count()
+    jobs_failed = db.query(PickJob).filter(PickJob.status == "failed").count()
+
+    job_stats = {
+        "total_games": total_games,
+        "queued": jobs_queued,
+        "running": jobs_running,
+        "done": jobs_done,
+        "failed": jobs_failed,
+    }
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -151,6 +169,7 @@ def home(request: Request, db: Session = Depends(get_db)):
             "picks": picks,
             "stats": stats,
             "games": game_lookup,
+            "job_stats": job_stats,
             "active_page": "home",
         },
     )
@@ -301,6 +320,12 @@ def api_espn_scoreboard(
         "count": len(events),
         "events": events,
     }
+
+
+@app.get("/api/logs")
+def api_logs(limit: int = 100):
+    handler = get_buffer_handler()
+    return {"entries": handler.entries(limit=limit)}
 
 
 @app.get("/espn/scoreboard", response_class=HTMLResponse)

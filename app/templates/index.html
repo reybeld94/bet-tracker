@@ -131,18 +131,134 @@
   </div>
 </div>
 
-<!-- How To -->
-<div class="card mt-3 how-to" style="max-width:600px;">
-  <div class="card-header">
-    <h3>Como usarlo</h3>
+<!-- System Status & Activity Log -->
+<div class="grid-2 mt-3">
+  <!-- Job Pipeline Status -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Estado del Pipeline</h3>
+    </div>
+    <div class="pipeline-stats">
+      <div class="pipeline-row">
+        <span class="pipeline-label">Games en DB</span>
+        <span class="pipeline-value">{{ job_stats.total_games }}</span>
+      </div>
+      <div class="pipeline-row">
+        <span class="pipeline-label">Jobs en cola</span>
+        <span class="pipeline-value status-queued">{{ job_stats.queued }}</span>
+      </div>
+      <div class="pipeline-row">
+        <span class="pipeline-label">Jobs corriendo</span>
+        <span class="pipeline-value status-running">{{ job_stats.running }}</span>
+      </div>
+      <div class="pipeline-row">
+        <span class="pipeline-label">Jobs completados</span>
+        <span class="pipeline-value status-done">{{ job_stats.done }}</span>
+      </div>
+      <div class="pipeline-row">
+        <span class="pipeline-label">Jobs fallidos</span>
+        <span class="pipeline-value status-failed">{{ job_stats.failed }}</span>
+      </div>
+    </div>
   </div>
-  <ol>
-    <li>Configura tu API key y ajustes en <a href="/ui/settings">Settings</a>.</li>
-    <li>Ejecuta la ingesta y enqueue de jobs para el dia.</li>
-    <li>Arranca el worker para que procese los auto-picks.</li>
-  </ol>
-  <p class="text-muted text-sm mt-2">
-    Los picks se generan automaticamente 2 horas antes de cada juego usando OpenAI.
-  </p>
+
+  <!-- How To -->
+  <div class="card how-to">
+    <div class="card-header">
+      <h3>Como usarlo</h3>
+    </div>
+    <ol>
+      <li>Configura tu API key y ajustes en <a href="/ui/settings">Settings</a>.</li>
+      <li>Los games se ingestran automaticamente de ESPN cada 15 min.</li>
+      <li>Los picks se generan 2h antes de cada juego usando OpenAI.</li>
+    </ol>
+    <p class="text-muted text-sm mt-2">
+      Revisa el Activity Log abajo para ver que esta pasando en el sistema.
+    </p>
+  </div>
 </div>
+
+<!-- Activity Log -->
+<div class="card mt-3">
+  <div class="card-header">
+    <h3>Activity Log</h3>
+    <div class="log-controls">
+      <label class="log-auto-label">
+        <input type="checkbox" id="log-auto-refresh" checked />
+        Auto-refresh
+      </label>
+      <button class="btn btn-sm btn-outline" id="log-refresh-btn">Refresh</button>
+    </div>
+  </div>
+  <div class="log-container" id="log-container">
+    <div class="log-loading">Cargando logs...</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const container = document.getElementById('log-container');
+  const autoCheck = document.getElementById('log-auto-refresh');
+  const refreshBtn = document.getElementById('log-refresh-btn');
+  let timer = null;
+
+  function levelClass(level) {
+    switch(level) {
+      case 'ERROR': return 'log-error';
+      case 'WARNING': return 'log-warn';
+      case 'INFO': return 'log-info';
+      case 'DEBUG': return 'log-debug';
+      default: return 'log-debug';
+    }
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  async function fetchLogs() {
+    try {
+      const resp = await fetch('/api/logs?limit=80');
+      const data = await resp.json();
+      if (!data.entries || data.entries.length === 0) {
+        container.innerHTML = '<div class="log-empty">No hay logs todavia. El sistema esta iniciando...</div>';
+        return;
+      }
+      let html = '';
+      for (const entry of data.entries) {
+        const cls = levelClass(entry.level);
+        html += '<div class="log-line ' + cls + '">'
+          + '<span class="log-ts">' + escapeHtml(entry.timestamp) + '</span>'
+          + '<span class="log-lvl">' + escapeHtml(entry.level) + '</span>'
+          + '<span class="log-src">' + escapeHtml(entry.logger.replace('app.', '')) + '</span>'
+          + '<span class="log-msg">' + escapeHtml(entry.message) + '</span>'
+          + '</div>';
+      }
+      container.innerHTML = html;
+    } catch(e) {
+      container.innerHTML = '<div class="log-empty">Error cargando logs: ' + escapeHtml(String(e)) + '</div>';
+    }
+  }
+
+  function startAutoRefresh() {
+    stopAutoRefresh();
+    fetchLogs();
+    timer = setInterval(fetchLogs, 5000);
+  }
+
+  function stopAutoRefresh() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  autoCheck.addEventListener('change', function() {
+    if (this.checked) startAutoRefresh();
+    else stopAutoRefresh();
+  });
+
+  refreshBtn.addEventListener('click', fetchLogs);
+  startAutoRefresh();
+})();
+</script>
 {% endblock %}
