@@ -19,6 +19,7 @@ from app.ingestion.espn_parser import parse_scoreboard
 from app.ingestion.sync import sync_games_for_date
 from app.models import Game, Pick, PickJob
 from app.picks.enqueue import enqueue_due_games
+from app.picks.worker import run_worker_with_shutdown
 from app.schemas import GameOut, GamesTodayResponse, PickJobOut, PickOut
 from app.settings import encrypt_api_key, get_or_create_settings
 
@@ -27,6 +28,8 @@ templates = Jinja2Templates(directory="app/templates")
 logger = logging.getLogger(__name__)
 _auto_ingest_task: asyncio.Task | None = None
 _auto_ingest_stop: asyncio.Event | None = None
+_auto_worker_task: asyncio.Task | None = None
+_auto_worker_stop: asyncio.Event | None = None
 
 
 def _parse_auto_ingest_leagues(raw: str) -> list[str]:
@@ -86,7 +89,7 @@ async def _auto_ingest_loop(interval_minutes: int, leagues: list[str]) -> None:
 
 @app.on_event("startup")
 async def start_auto_ingest() -> None:
-    global _auto_ingest_task, _auto_ingest_stop
+    global _auto_ingest_task, _auto_ingest_stop, _auto_worker_task, _auto_worker_stop
     interval_minutes = int(os.getenv("AUTO_INGEST_INTERVAL_MINUTES", "15"))
     leagues_raw = os.getenv("AUTO_INGEST_LEAGUES", "NBA,NHL")
     leagues = _parse_auto_ingest_leagues(leagues_raw)
@@ -94,17 +97,25 @@ async def start_auto_ingest() -> None:
     _auto_ingest_task = asyncio.create_task(
         _auto_ingest_loop(interval_minutes, leagues)
     )
+    _auto_worker_stop = asyncio.Event()
+    _auto_worker_task = asyncio.create_task(run_worker_with_shutdown(_auto_worker_stop))
 
 
 @app.on_event("shutdown")
 async def stop_auto_ingest() -> None:
-    global _auto_ingest_task, _auto_ingest_stop
+    global _auto_ingest_task, _auto_ingest_stop, _auto_worker_task, _auto_worker_stop
     if _auto_ingest_stop:
         _auto_ingest_stop.set()
+    if _auto_worker_stop:
+        _auto_worker_stop.set()
     if _auto_ingest_task:
         await _auto_ingest_task
+    if _auto_worker_task:
+        await _auto_worker_task
     _auto_ingest_task = None
     _auto_ingest_stop = None
+    _auto_worker_task = None
+    _auto_worker_stop = None
 
 
 @app.get("/", response_class=HTMLResponse)
