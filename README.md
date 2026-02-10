@@ -131,8 +131,9 @@ Ejemplo cada 15 minutos:
 ## Auto-ingesta al levantar la app
 
 La app ejecuta auto-ingesta siempre al iniciar y, tras cada ciclo, encola automáticamente
-partidos pendientes cuya hora de inicio sea en <= 2 horas (o que ya pasaron esa ventana)
-para que el worker los procese sin pasos manuales.
+partidos pendientes cuya hora de inicio sea en <= 2 horas (o que ya pasaron esa ventana).
+Además, al iniciar también levanta el worker en segundo plano para procesar la cola sin
+pasos manuales adicionales.
 
 Variables útiles:
 - `AUTO_INGEST_LEAGUES`: lista de ligas separadas por coma.

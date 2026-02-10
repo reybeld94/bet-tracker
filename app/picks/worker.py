@@ -157,6 +157,36 @@ async def run_worker() -> None:
         await asyncio.gather(*tasks)
 
 
+async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
+    """Run worker loop until stop_event is set."""
+    hostname = socket.gethostname()
+    pid = os.getpid()
+    lock_owner = f"{hostname}:{pid}"
+
+    while not stop_event.is_set():
+        with SessionLocal() as db:
+            settings = get_or_create_settings(db)
+            settings_snapshot = snapshot_settings(settings)
+
+        job_ids = _claim_jobs(settings_snapshot.auto_picks_concurrency, lock_owner)
+        if not job_ids:
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=settings_snapshot.auto_picks_poll_seconds,
+                )
+            except asyncio.TimeoutError:
+                continue
+            continue
+
+        semaphore = asyncio.Semaphore(settings_snapshot.auto_picks_concurrency)
+        tasks = [
+            asyncio.create_task(_process_job(job_id, settings_snapshot, lock_owner, semaphore))
+            for job_id in job_ids
+        ]
+        await asyncio.gather(*tasks)
+
+
 def main() -> None:
     try:
         asyncio.run(run_worker())
