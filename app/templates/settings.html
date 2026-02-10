@@ -20,12 +20,9 @@
   {% endif %}
 
   <form method="post" action="/ui/settings">
-    <label>Admin Password</label>
-    <input type="password" name="admin_password" value="{{ admin_password }}" placeholder="APP_ADMIN_PASSWORD" required />
-
     <label>OpenAI API Key</label>
     <input type="password" name="openai_api_key" placeholder="{{ 'API key stored' if has_key else 'sk-...' }}" />
-    <div class="muted">Tu API key se guarda encriptada.</div>
+    <div class="muted">La API key se guarda en configuración local.</div>
 
     <div class="row">
       <div>
