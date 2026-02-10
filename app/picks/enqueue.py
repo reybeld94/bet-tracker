@@ -32,11 +32,19 @@ def _enqueue_for_game(db: Session, game: Game) -> bool:
         return False
     if game.status.lower() not in {"scheduled", "in_progress"}:
         return False
-    existing = db.query(PickJob).filter(PickJob.game_id == game.id).one_or_none()
-    if existing:
-        return False
     existing_pick = db.query(Pick).filter(Pick.game_id == game.id).one_or_none()
     if existing_pick is not None:
+        return False
+    existing = db.query(PickJob).filter(PickJob.game_id == game.id).one_or_none()
+    if existing:
+        # Re-queue failed jobs so they get another chance
+        if existing.status == "failed":
+            existing.status = "queued"
+            existing.locked_at_utc = None
+            existing.lock_owner = None
+            existing.updated_at_utc = datetime.now(timezone.utc)
+            logger.info("Re-queued failed job #%d for game #%d", existing.id, game.id)
+            return True
         return False
     run_at = game.start_time_utc - timedelta(hours=2)
     now = datetime.now(timezone.utc)

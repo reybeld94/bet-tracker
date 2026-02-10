@@ -101,6 +101,7 @@ def _upsert_pick(db, game_id: int, ai_payload: dict, raw_ai_json: str) -> None:
 
 def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
     logger.info("Processing job #%d ...", job_id)
+    max_retries = settings_snapshot.auto_picks_max_retries
     with SessionLocal() as db:
         job = db.query(PickJob).filter(PickJob.id == job_id).one_or_none()
         if not job or job.status != "running" or job.lock_owner != lock_owner:
@@ -142,7 +143,6 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
             job.updated_at_utc = _utcnow()
             db.commit()
         except Exception as exc:
-            logger.error("Job #%d FAILED: %s", job_id, exc, exc_info=True)
             db.rollback()
             job = db.query(PickJob).filter(PickJob.id == job_id).one_or_none()
             if not job:
@@ -150,9 +150,16 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
             job.attempts += 1
             job.last_error = str(exc)
             job.updated_at_utc = _utcnow()
-            job.status = "failed"
             job.locked_at_utc = None
             job.lock_owner = None
+            if job.attempts < max_retries:
+                job.status = "queued"
+                logger.warning("Job #%d FAILED (attempt %d/%d), re-queued: %s",
+                               job_id, job.attempts, max_retries, exc)
+            else:
+                job.status = "failed"
+                logger.error("Job #%d FAILED permanently after %d attempts: %s",
+                             job_id, job.attempts, exc, exc_info=True)
             db.commit()
 
 
@@ -198,14 +205,22 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
             has_key = bool(settings_snapshot.openai_api_key_enc)
 
         if not has_key:
-            logger.warning("Worker poll: no OpenAI API key configured — skipping")
-        else:
-            logger.debug(
-                "Worker poll: api_key=configured model=%s concurrency=%d poll=%ds",
-                settings_snapshot.openai_model,
-                settings_snapshot.auto_picks_concurrency,
-                settings_snapshot.auto_picks_poll_seconds,
-            )
+            logger.warning("Worker poll: no OpenAI API key configured — skipping (configure in Settings)")
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=settings_snapshot.auto_picks_poll_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass
+            continue
+
+        logger.debug(
+            "Worker poll: api_key=configured model=%s concurrency=%d poll=%ds",
+            settings_snapshot.openai_model,
+            settings_snapshot.auto_picks_concurrency,
+            settings_snapshot.auto_picks_poll_seconds,
+        )
 
         job_ids = _claim_jobs(settings_snapshot.auto_picks_concurrency, lock_owner)
         if not job_ids:

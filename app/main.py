@@ -322,6 +322,23 @@ def api_espn_scoreboard(
     }
 
 
+@app.post("/api/retry-failed")
+def api_retry_failed(db: Session = Depends(get_db)):
+    """Reset all failed jobs back to queued so the worker retries them."""
+    now = datetime.now(timezone.utc)
+    failed_jobs = db.query(PickJob).filter(PickJob.status == "failed").all()
+    count = 0
+    for job in failed_jobs:
+        job.status = "queued"
+        job.locked_at_utc = None
+        job.lock_owner = None
+        job.updated_at_utc = now
+        count += 1
+    db.commit()
+    logger.info("Retry-failed: re-queued %d failed jobs", count)
+    return {"re_queued": count}
+
+
 @app.get("/api/logs")
 def api_logs(limit: int = 100):
     handler = get_buffer_handler()

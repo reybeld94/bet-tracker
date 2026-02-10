@@ -160,6 +160,11 @@
         <span class="pipeline-value status-failed">{{ job_stats.failed }}</span>
       </div>
     </div>
+    {% if job_stats.failed > 0 %}
+    <div style="margin-top:12px;">
+      <button class="btn btn-sm btn-danger" id="retry-failed-btn">Reintentar {{ job_stats.failed }} fallidos</button>
+    </div>
+    {% endif %}
   </div>
 
   <!-- How To -->
@@ -259,6 +264,24 @@
 
   refreshBtn.addEventListener('click', fetchLogs);
   startAutoRefresh();
+
+  // Retry failed jobs button
+  var retryBtn = document.getElementById('retry-failed-btn');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', async function() {
+      retryBtn.disabled = true;
+      retryBtn.textContent = 'Reintentando...';
+      try {
+        var resp = await fetch('/api/retry-failed', {method: 'POST'});
+        var data = await resp.json();
+        retryBtn.textContent = data.re_queued + ' re-encolados';
+        setTimeout(function() { location.reload(); }, 1500);
+      } catch(e) {
+        retryBtn.textContent = 'Error';
+        retryBtn.disabled = false;
+      }
+    });
+  }
 })();
 </script>
 {% endblock %}
