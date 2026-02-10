@@ -18,6 +18,7 @@ from app.ingestion.leagues import LEAGUE_PATHS
 from app.ingestion.espn_parser import parse_scoreboard
 from app.ingestion.sync import sync_games_for_date
 from app.models import Game, Pick, PickJob
+from app.picks.enqueue import enqueue_due_games
 from app.schemas import GameOut, GamesTodayResponse, PickJobOut, PickOut
 from app.settings import encrypt_api_key, get_or_create_settings
 
@@ -69,6 +70,9 @@ async def _auto_ingest_loop(interval_minutes: int, leagues: list[str]) -> None:
     while _auto_ingest_stop and not _auto_ingest_stop.is_set():
         try:
             await _run_auto_ingest_once(leagues)
+            enqueued = await asyncio.to_thread(enqueue_due_games, leagues, 2)
+            if enqueued:
+                logger.info("Auto-enqueue done: enqueued=%s", enqueued)
         except Exception:
             logger.exception("Auto-ingest failed.")
         try:
@@ -83,9 +87,6 @@ async def _auto_ingest_loop(interval_minutes: int, leagues: list[str]) -> None:
 @app.on_event("startup")
 async def start_auto_ingest() -> None:
     global _auto_ingest_task, _auto_ingest_stop
-    enabled = os.getenv("AUTO_INGEST_ENABLED", "").lower() in {"1", "true", "yes"}
-    if not enabled:
-        return
     interval_minutes = int(os.getenv("AUTO_INGEST_INTERVAL_MINUTES", "15"))
     leagues_raw = os.getenv("AUTO_INGEST_LEAGUES", "NBA,NHL")
     leagues = _parse_auto_ingest_leagues(leagues_raw)
@@ -168,7 +169,7 @@ async def settings_save(request: Request, db: Session = Depends(get_db)):
     settings.auto_picks_concurrency = int(form.get("auto_picks_concurrency", settings.auto_picks_concurrency))
     settings.auto_picks_poll_seconds = int(form.get("auto_picks_poll_seconds", settings.auto_picks_poll_seconds))
     settings.auto_picks_max_retries = int(form.get("auto_picks_max_retries", settings.auto_picks_max_retries))
-    settings.auto_picks_enabled = bool(form.get("auto_picks_enabled"))
+    settings.auto_picks_enabled = True
     settings.allow_totals_default = bool(form.get("allow_totals_default"))
     settings.updated_at_utc = datetime.now(timezone.utc)
     db.commit()
