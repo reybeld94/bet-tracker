@@ -16,6 +16,9 @@ from app.settings import get_or_create_settings, snapshot_settings
 
 logger = logging.getLogger(__name__)
 
+# Running jobs older than this timeout are considered orphaned and re-queued.
+_RUNNING_STALE_TIMEOUT_SECONDS = 15 * 60
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -95,6 +98,47 @@ def _queue_snapshot() -> dict[str, str | int]:
         "next_queued_run_at": _format_dt(next_job.run_at_utc if next_job else None),
         "now_utc": _format_dt(now),
     }
+
+
+def _requeue_stale_running_jobs(current_lock_owner: str) -> int:
+    """Recover running jobs that were left behind by a dead worker process."""
+    now = _utcnow()
+    stale_before = now.timestamp() - _RUNNING_STALE_TIMEOUT_SECONDS
+    stale_before_dt = datetime.fromtimestamp(stale_before, tz=timezone.utc)
+    recovered = 0
+
+    with SessionLocal() as db:
+        stale_jobs = (
+            db.query(PickJob)
+            .filter(
+                PickJob.status == "running",
+                PickJob.locked_at_utc.isnot(None),
+                PickJob.locked_at_utc <= stale_before_dt,
+            )
+            .all()
+        )
+        for job in stale_jobs:
+            previous_owner = job.lock_owner or "unknown"
+            job.status = "queued"
+            job.run_at_utc = now
+            job.locked_at_utc = None
+            job.lock_owner = None
+            job.last_error = (
+                f"Recovered stale running job from lock_owner={previous_owner} "
+                f"by lock_owner={current_lock_owner}"
+            )
+            job.updated_at_utc = now
+            recovered += 1
+
+        if recovered:
+            db.commit()
+            logger.warning(
+                "Recovered %d stale running job(s) older than %ds",
+                recovered,
+                _RUNNING_STALE_TIMEOUT_SECONDS,
+            )
+
+    return recovered
 
 
 def _coerce_no_odds(ai_payload: dict, missing_label: str = "odds") -> dict:
@@ -290,6 +334,8 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
                 settings_snapshot.auto_picks_concurrency,
                 settings_snapshot.auto_picks_poll_seconds,
             )
+
+        _requeue_stale_running_jobs(lock_owner)
 
         job_ids = _claim_jobs(settings_snapshot.auto_picks_concurrency, lock_owner)
         if not job_ids:
