@@ -33,17 +33,29 @@ def _utc_day_range(day: date) -> tuple[datetime, datetime]:
     return start, end
 
 
-def _enqueue_for_game(db: Session, game: Game) -> bool:
+def _enqueue_for_game(
+    db: Session,
+    game: Game,
+    *,
+    now: datetime | None = None,
+    pregame_window_hours: int = 2,
+) -> bool:
     if not game.start_time_utc:
         return False
-    if game.status.lower() not in {"scheduled", "in_progress"}:
+    if game.status.lower() != "scheduled":
         return False
+
+    now_utc = now or datetime.now(timezone.utc)
+    game_start_utc = _ensure_utc(game.start_time_utc)
+    window_start = game_start_utc - timedelta(hours=pregame_window_hours)
+    if not (window_start <= now_utc <= game_start_utc):
+        return False
+
     existing_pick = db.query(Pick).filter(Pick.game_id == game.id).one_or_none()
     if existing_pick is not None:
         return False
 
-    run_at = _ensure_utc(game.start_time_utc) - timedelta(hours=2)
-    now = datetime.now(timezone.utc)
+    run_at = now_utc
 
     existing = db.query(PickJob).filter(PickJob.game_id == game.id).one_or_none()
     if existing:
@@ -51,11 +63,11 @@ def _enqueue_for_game(db: Session, game: Game) -> bool:
             return False
         existing.status = "queued"
         existing.attempts = 0
-        existing.run_at_utc = now
+        existing.run_at_utc = now_utc
         existing.locked_at_utc = None
         existing.lock_owner = None
         existing.last_error = None
-        existing.updated_at_utc = now
+        existing.updated_at_utc = now_utc
         return True
 
     job = PickJob(
@@ -66,8 +78,8 @@ def _enqueue_for_game(db: Session, game: Game) -> bool:
         locked_at_utc=None,
         lock_owner=None,
         last_error=None,
-        created_at_utc=now,
-        updated_at_utc=now,
+        created_at_utc=now_utc,
+        updated_at_utc=now_utc,
     )
     db.add(job)
     return True
@@ -78,6 +90,7 @@ def enqueue_for_date(target_date: date, leagues: list[str]) -> int:
     created = 0
     with SessionLocal() as db:
         query = db.query(Game).filter(
+            Game.provider == "espn",
             Game.start_time_utc.isnot(None),
             Game.start_time_utc >= start_utc,
             Game.start_time_utc < end_utc,
@@ -93,21 +106,26 @@ def enqueue_for_date(target_date: date, leagues: list[str]) -> int:
 
 
 def enqueue_due_games(leagues: list[str], horizon_hours: int = 2) -> int:
-    """Enqueue unanalyzed games starting within horizon hours (or sooner)."""
+    """Enqueue unanalyzed games when current time is in pregame window.
+
+    A game is eligible when now is between (start - horizon_hours) and start.
+    """
     now = datetime.now(timezone.utc)
     horizon = now + timedelta(hours=horizon_hours)
     created = 0
     with SessionLocal() as db:
         query = db.query(Game).filter(
+            Game.provider == "espn",
             Game.start_time_utc.isnot(None),
+            Game.start_time_utc >= now,
             Game.start_time_utc <= horizon,
-            Game.status.in_(["scheduled", "in_progress"]),
+            Game.status == "scheduled",
         )
         if leagues:
             query = query.filter(Game.league.in_(leagues))
         games = query.order_by(Game.start_time_utc.asc()).all()
         for game in games:
-            if _enqueue_for_game(db, game):
+            if _enqueue_for_game(db, game, now=now, pregame_window_hours=horizon_hours):
                 created += 1
         db.commit()
     return created

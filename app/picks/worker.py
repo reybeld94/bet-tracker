@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -152,6 +152,21 @@ def _coerce_no_odds(ai_payload: dict, missing_label: str = "odds") -> dict:
     return ai_payload
 
 
+def _is_in_pregame_window(
+    game_start_utc: datetime | None,
+    *,
+    now_utc: datetime,
+    pregame_window_hours: int = 2,
+) -> bool:
+    if game_start_utc is None:
+        return False
+    if game_start_utc.tzinfo is None:
+        game_start_utc = game_start_utc.replace(tzinfo=timezone.utc)
+    game_start_utc = game_start_utc.astimezone(timezone.utc)
+    window_start = game_start_utc - timedelta(hours=pregame_window_hours)
+    return window_start <= now_utc <= game_start_utc
+
+
 def _upsert_pick(db, game_id: int, ai_payload: dict, raw_ai_json: str) -> None:
     now = _utcnow()
     pick = db.query(Pick).filter(Pick.game_id == game_id).one_or_none()
@@ -196,6 +211,32 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
             game = db.query(Game).filter(Game.id == job.game_id).one_or_none()
             if not game:
                 raise RuntimeError("Game not found for job.")
+
+            now_utc = _utcnow()
+            if game.provider != "espn":
+                logger.info("Job #%d: non-ESPN game #%d skipped", job_id, game.id)
+                job.status = "done"
+                job.last_error = "Skipped non-ESPN game"
+                job.updated_at_utc = now_utc
+                db.commit()
+                return
+
+            if game.status.lower() != "scheduled":
+                logger.info("Job #%d: game status=%s skipped", job_id, game.status)
+                job.status = "done"
+                job.last_error = f"Skipped game status={game.status}"
+                job.updated_at_utc = now_utc
+                db.commit()
+                return
+
+            if not _is_in_pregame_window(game.start_time_utc, now_utc=now_utc):
+                logger.info("Job #%d: game outside pregame window, skipped", job_id)
+                job.status = "done"
+                job.last_error = "Skipped game outside pregame window"
+                job.updated_at_utc = now_utc
+                db.commit()
+                return
+
             logger.info("Job #%d: game=%s vs %s (%s) start=%s",
                         job_id, game.home_team, game.away_team, game.league,
                         game.start_time_utc)
