@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import socket
+import traceback
 
 from app.ai.openai_client import OpenAIClientError, request_pick
 from app.db import SessionLocal
@@ -181,30 +182,37 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
             job.updated_at_utc = _utcnow()
             db.commit()
         except Exception as exc:
-            logger.error("Job #%d FAILED: %s", job_id, exc, exc_info=True)
+            exc_name = type(exc).__name__
+            exc_message = str(exc).strip() or "(no message)"
+            error_summary = f"{exc_name}: {exc_message}"
+            logger.error("Job #%d FAILED: %s", job_id, error_summary, exc_info=True)
             db.rollback()
             job = db.query(PickJob).filter(PickJob.id == job_id).one_or_none()
             if not job:
                 return
             job.attempts += 1
-            job.last_error = str(exc)
+            job.last_error = error_summary
             job.updated_at_utc = _utcnow()
             if job.attempts <= settings_snapshot.auto_picks_max_retries:
                 job.status = "queued"
                 job.run_at_utc = _utcnow()
-                logger.info(
-                    "Job #%d re-queued (%d/%d attempts)",
+                logger.warning(
+                    "Job #%d re-queued (%d/%d attempts) due to %s",
                     job_id,
                     job.attempts,
                     settings_snapshot.auto_picks_max_retries,
+                    error_summary,
                 )
             else:
                 job.status = "failed"
+                trace_tail = traceback.format_exc(limit=6).strip().replace("\n", " | ")
                 logger.error(
-                    "Job #%d exhausted retries (%d/%d)",
+                    "Job #%d exhausted retries (%d/%d) | last_error=%s | trace=%s",
                     job_id,
                     job.attempts,
                     settings_snapshot.auto_picks_max_retries,
+                    error_summary,
+                    trace_tail,
                 )
             job.locked_at_utc = None
             job.lock_owner = None
