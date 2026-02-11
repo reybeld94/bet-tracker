@@ -57,6 +57,45 @@ def _claim_jobs(concurrency: int, lock_owner: str) -> list[int]:
     return job_ids
 
 
+def _format_dt(value: datetime | None) -> str:
+    if value is None:
+        return "none"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _queue_snapshot() -> dict[str, str | int]:
+    now = _utcnow()
+    with SessionLocal() as db:
+        total = db.query(PickJob).count()
+        queued = db.query(PickJob).filter(PickJob.status == "queued").count()
+        eligible = db.query(PickJob).filter(
+            PickJob.status == "queued",
+            PickJob.run_at_utc <= now,
+        ).count()
+        running = db.query(PickJob).filter(PickJob.status == "running").count()
+        failed = db.query(PickJob).filter(PickJob.status == "failed").count()
+        done = db.query(PickJob).filter(PickJob.status == "done").count()
+        next_job = (
+            db.query(PickJob)
+            .filter(PickJob.status == "queued")
+            .order_by(PickJob.run_at_utc.asc())
+            .first()
+        )
+
+    return {
+        "total": total,
+        "queued": queued,
+        "eligible": eligible,
+        "running": running,
+        "done": done,
+        "failed": failed,
+        "next_queued_run_at": _format_dt(next_job.run_at_utc if next_job else None),
+        "now_utc": _format_dt(now),
+    }
+
+
 def _coerce_no_odds(ai_payload: dict, missing_label: str = "odds") -> dict:
     missing_data = list(ai_payload.get("missing_data") or [])
     if missing_label not in missing_data:
@@ -206,12 +245,25 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
     pid = os.getpid()
     lock_owner = f"{hostname}:{pid}"
     logger.info("Worker started (lock_owner=%s)", lock_owner)
+    idle_polls = 0
 
     while not stop_event.is_set():
         with SessionLocal() as db:
             settings = get_or_create_settings(db)
             settings_snapshot = snapshot_settings(settings)
             has_key = bool(settings_snapshot.openai_api_key_enc)
+            picks_enabled = bool(settings_snapshot.auto_picks_enabled)
+
+        if not picks_enabled:
+            logger.warning("Worker poll: auto_picks_enabled=false — worker idle")
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=settings_snapshot.auto_picks_poll_seconds,
+                )
+            except asyncio.TimeoutError:
+                continue
+            continue
 
         if not has_key:
             logger.warning("Worker poll: no OpenAI API key configured — skipping")
@@ -233,7 +285,23 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
 
         job_ids = _claim_jobs(settings_snapshot.auto_picks_concurrency, lock_owner)
         if not job_ids:
-            logger.debug("No eligible jobs, sleeping %ds ...", settings_snapshot.auto_picks_poll_seconds)
+            idle_polls += 1
+            if idle_polls == 1 or idle_polls % 10 == 0:
+                snapshot = _queue_snapshot()
+                logger.info(
+                    "Worker idle: no eligible jobs | total=%s queued=%s eligible=%s running=%s done=%s failed=%s "
+                    "next_queued_run_at=%s now_utc=%s",
+                    snapshot["total"],
+                    snapshot["queued"],
+                    snapshot["eligible"],
+                    snapshot["running"],
+                    snapshot["done"],
+                    snapshot["failed"],
+                    snapshot["next_queued_run_at"],
+                    snapshot["now_utc"],
+                )
+            else:
+                logger.debug("No eligible jobs, sleeping %ds ...", settings_snapshot.auto_picks_poll_seconds)
             try:
                 await asyncio.wait_for(
                     stop_event.wait(),
@@ -242,6 +310,8 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
             except asyncio.TimeoutError:
                 continue
             continue
+
+        idle_polls = 0
 
         semaphore = asyncio.Semaphore(settings_snapshot.auto_picks_concurrency)
         tasks = [
