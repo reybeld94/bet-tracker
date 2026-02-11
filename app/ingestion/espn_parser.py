@@ -15,14 +15,14 @@ def _safe_int(value: Any) -> int | None:
         return None
 
 
-def _parse_start_time(event: dict[str, Any]) -> datetime:
+def _parse_start_time(event: dict[str, Any]) -> datetime | None:
     date_value = event.get("date")
     if isinstance(date_value, str):
         try:
             return datetime.fromisoformat(date_value.replace("Z", "+00:00"))
         except ValueError:
             pass
-    return datetime.now(timezone.utc)
+    return None
 
 
 def _normalize_status(status: dict[str, Any]) -> str:
@@ -144,6 +144,8 @@ def parse_scoreboard(scoreboard_json: dict, league_key: str) -> list[GameIngestD
             away_name = away_team.get("displayName") or away_team.get("name") or "TBD"
 
             start_time_utc = _parse_start_time(event)
+            if start_time_utc is None:
+                continue
             status = _normalize_status(competition.get("status", {}))
 
             raw_payload = {
