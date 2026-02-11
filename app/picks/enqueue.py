@@ -13,6 +13,12 @@ from app.models import Game, Pick, PickJob
 logger = logging.getLogger(__name__)
 
 
+def _ensure_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _parse_leagues(raw: str) -> list[str]:
     leagues = [league.strip().upper() for league in raw.split(",") if league.strip()]
     invalid = [league for league in leagues if league not in LEAGUE_PATHS]
@@ -32,14 +38,26 @@ def _enqueue_for_game(db: Session, game: Game) -> bool:
         return False
     if game.status.lower() not in {"scheduled", "in_progress"}:
         return False
-    existing = db.query(PickJob).filter(PickJob.game_id == game.id).one_or_none()
-    if existing:
-        return False
     existing_pick = db.query(Pick).filter(Pick.game_id == game.id).one_or_none()
     if existing_pick is not None:
         return False
-    run_at = game.start_time_utc - timedelta(hours=2)
+
+    run_at = _ensure_utc(game.start_time_utc) - timedelta(hours=2)
     now = datetime.now(timezone.utc)
+
+    existing = db.query(PickJob).filter(PickJob.game_id == game.id).one_or_none()
+    if existing:
+        if existing.status != "failed":
+            return False
+        existing.status = "queued"
+        existing.attempts = 0
+        existing.run_at_utc = now
+        existing.locked_at_utc = None
+        existing.lock_owner = None
+        existing.last_error = None
+        existing.updated_at_utc = now
+        return True
+
     job = PickJob(
         game_id=game.id,
         run_at_utc=run_at,
