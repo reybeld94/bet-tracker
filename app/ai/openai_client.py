@@ -21,13 +21,13 @@ def _build_response_payload(model: str, reasoning_effort: str, payload: dict[str
         "input": [
             {
                 "role": "developer",
-                "content": [{"type": "text", "text": DEV_PROMPT}],
+                "content": [{"type": "input_text", "text": DEV_PROMPT}],
             },
             {
                 "role": "user",
                 "content": [
                     {
-                        "type": "text",
+                        "type": "input_text",
                         "text": json.dumps(payload, ensure_ascii=False),
                     }
                 ],
