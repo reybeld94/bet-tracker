@@ -4,10 +4,9 @@
 {% block content %}
 <div class="page-header">
   <h1>Dashboard</h1>
-  <p class="subtitle">Resumen de auto-picks recientes</p>
+  <p class="subtitle">Partidos ESPN + analisis IA + picks guardados</p>
 </div>
 
-<!-- Stats Bar -->
 <div class="stats-bar">
   <div class="stat-pill total">
     <span>Total</span>
@@ -27,238 +26,278 @@
   </div>
 </div>
 
-<div class="grid-2">
-  <!-- Picks Table -->
-  <div class="card" style="grid-column: 1 / -1;">
-    <div class="card-header">
-      <h3>Auto Picks Recientes</h3>
+<div class="card">
+  <div class="card-header">
+    <h3>Partidos de ESPN</h3>
+    <div class="actions-row">
+      <button class="btn btn-primary btn-sm" id="load-espn-btn">Traer partidos ESPN</button>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Juego</th>
-            <th>Resultado</th>
-            <th>Market</th>
-            <th style="text-align:center;">Confianza</th>
-            <th style="text-align:right;">EV</th>
-            <th style="text-align:right;">Stake</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for pick in picks %}
-            {% set game = games.get(pick.game_id) %}
-            <tr>
-              <td>
-                {% if game %}
-                  <div class="flex items-center gap-2">
-                    <div class="matchup">
-                      {% set home_logo = team_logo_url(game.home_team) %}
-                      {% set away_logo = team_logo_url(game.away_team) %}
-                      {% if home_logo %}
-                        <img src="{{ home_logo }}" alt="" class="team-logo sm" />
-                      {% endif %}
-                      <span class="team-name">{{ game.home_team }}</span>
-                      <span class="vs-divider">vs</span>
-                      {% if away_logo %}
-                        <img src="{{ away_logo }}" alt="" class="team-logo sm" />
-                      {% endif %}
-                      <span class="team-name">{{ game.away_team }}</span>
-                    </div>
-                  </div>
-                  <div class="text-xs text-muted mt-1">
-                    <span class="league-badge {{ game.league|lower }}">
-                      {% set ll = league_logo_url(game.league) %}
-                      {% if ll %}<img src="{{ ll }}" alt="" />{% endif %}
-                      {{ game.league }}
-                    </span>
-                    <span style="margin-left:6px;">{{ game.start_time_utc.strftime('%m/%d %H:%M') if game.start_time_utc else '' }} UTC</span>
-                  </div>
-                {% else %}
-                  <span class="text-muted">Game #{{ pick.game_id }}</span>
-                {% endif %}
-              </td>
-              <td>
-                {% if pick.result == 'BET' %}
-                  <span class="badge badge-bet">{{ pick.emoji }} BET</span>
-                {% elif pick.result == 'LEAN' %}
-                  <span class="badge badge-lean">{{ pick.emoji }} LEAN</span>
-                {% else %}
-                  <span class="badge badge-no-bet">{{ pick.emoji }} NO BET</span>
-                {% endif %}
-              </td>
-              <td>
-                <span class="font-bold">{{ pick.market or '-' }}</span>
-                {% if pick.selection %}
-                  <div class="text-xs text-muted">{{ pick.selection }}</div>
-                {% endif %}
-              </td>
-              <td style="text-align:center;">
-                <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
-                  <span class="text-sm font-bold">{{ pick.confidence }}%</span>
-                  <div class="confidence-bar" style="width:60px;">
-                    <div class="fill {% if pick.confidence >= 70 %}high{% elif pick.confidence >= 40 %}medium{% else %}low{% endif %}" style="width:{{ pick.confidence }}%;"></div>
-                  </div>
-                </div>
-              </td>
-              <td style="text-align:right;">
-                {% if pick.ev is not none %}
-                  <span class="{% if pick.ev > 0 %}ev-positive{% elif pick.ev < 0 %}ev-negative{% endif %} text-mono">
-                    {% if pick.ev > 0 %}+{% endif %}{{ "%.1f"|format(pick.ev) }}%
-                  </span>
-                {% else %}
-                  <span class="text-muted">-</span>
-                {% endif %}
-              </td>
-              <td style="text-align:right;">
-                {% if pick.stake_u %}
-                  <span class="font-bold">{{ pick.stake_u }}u</span>
-                {% else %}
-                  <span class="text-muted">-</span>
-                {% endif %}
-              </td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="6" class="table-empty">
-                No hay picks todavia. Los picks se generan automaticamente 2 horas antes de cada juego.
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+  </div>
+  <p class="text-muted" id="espn-status">Selecciona el boton para cargar partidos.</p>
+  <div class="table-wrap mt-2">
+    <table>
+      <thead>
+        <tr>
+          <th>Liga</th>
+          <th>Partido</th>
+          <th>Hora (UTC)</th>
+          <th>Estado</th>
+          <th>Accion</th>
+        </tr>
+      </thead>
+      <tbody id="espn-events-body">
+        <tr><td colspan="5" class="table-empty">Aun no se cargaron partidos.</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
-<!-- System Status & Activity Log -->
-<div class="grid-2 mt-3">
-  <!-- Job Pipeline Status -->
-  <div class="card">
-    <div class="card-header">
-      <h3>Estado del Pipeline</h3>
-    </div>
-    <div class="pipeline-stats">
-      <div class="pipeline-row">
-        <span class="pipeline-label">Games en DB</span>
-        <span class="pipeline-value">{{ job_stats.total_games }}</span>
-      </div>
-      <div class="pipeline-row">
-        <span class="pipeline-label">Jobs en cola</span>
-        <span class="pipeline-value status-queued">{{ job_stats.queued }}</span>
-      </div>
-      <div class="pipeline-row">
-        <span class="pipeline-label">Jobs corriendo</span>
-        <span class="pipeline-value status-running">{{ job_stats.running }}</span>
-      </div>
-      <div class="pipeline-row">
-        <span class="pipeline-label">Jobs completados</span>
-        <span class="pipeline-value status-done">{{ job_stats.done }}</span>
-      </div>
-      <div class="pipeline-row">
-        <span class="pipeline-label">Jobs fallidos</span>
-        <span class="pipeline-value status-failed">{{ job_stats.failed }}</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- How To -->
-  <div class="card how-to">
-    <div class="card-header">
-      <h3>Como usarlo</h3>
-    </div>
-    <ol>
-      <li>Configura tu API key y ajustes en <a href="/ui/settings">Settings</a>.</li>
-      <li>Los games se ingestran automaticamente de ESPN cada 15 min.</li>
-      <li>Los picks se generan 2h antes de cada juego usando OpenAI.</li>
-    </ol>
-    <p class="text-muted text-sm mt-2">
-      Revisa el Activity Log abajo para ver que esta pasando en el sistema.
-    </p>
-  </div>
-</div>
-
-<!-- Activity Log -->
 <div class="card mt-3">
   <div class="card-header">
-    <h3>Activity Log</h3>
-    <div class="log-controls">
-      <label class="log-auto-label">
-        <input type="checkbox" id="log-auto-refresh" checked />
-        Auto-refresh
-      </label>
-      <button class="btn btn-sm btn-outline" id="log-refresh-btn">Refresh</button>
-    </div>
+    <h3>Picks guardados</h3>
   </div>
-  <div class="log-container" id="log-container">
-    <div class="log-loading">Cargando logs...</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Juego</th>
+          <th>Resultado</th>
+          <th>Market</th>
+          <th style="text-align:center;">Confianza</th>
+          <th style="text-align:right;">EV</th>
+          <th style="text-align:right;">Stake</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pick in picks %}
+          {% set game = games.get(pick.game_id) %}
+          <tr>
+            <td>
+              {% if game %}
+                <div class="matchup compact">
+                  <span class="team-name">{{ game.home_team }}</span>
+                  <span class="vs-divider">vs</span>
+                  <span class="team-name">{{ game.away_team }}</span>
+                </div>
+                <div class="text-xs text-muted mt-1">
+                  <span class="league-badge {{ game.league|lower }}">{{ game.league }}</span>
+                </div>
+              {% else %}
+                <span class="text-muted">Game #{{ pick.game_id }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if pick.result == 'BET' %}
+                <span class="badge badge-bet">{{ pick.emoji }} BET</span>
+              {% elif pick.result == 'LEAN' %}
+                <span class="badge badge-lean">{{ pick.emoji }} LEAN</span>
+              {% else %}
+                <span class="badge badge-no-bet">{{ pick.emoji }} NO BET</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="font-bold">{{ pick.market or '-' }}</span>
+              {% if pick.selection %}<div class="text-xs text-muted">{{ pick.selection }}</div>{% endif %}
+            </td>
+            <td style="text-align:center;">
+              <span class="text-sm font-bold">{{ pick.confidence }}%</span>
+            </td>
+            <td style="text-align:right;">{{ ('%+.1f%%'|format(pick.ev)) if pick.ev is not none else '-' }}</td>
+            <td style="text-align:right;">{{ ('%.2fu'|format(pick.stake_u)) if pick.stake_u else '-' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="table-empty">No hay picks guardados todavia.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="analysis-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="card-header">
+      <h3 id="analysis-modal-title">Analisis IA</h3>
+      <button class="btn btn-outline btn-sm" id="close-analysis-modal">Cerrar</button>
+    </div>
+    <div id="analysis-modal-body" class="modal-body"></div>
   </div>
 </div>
 
 <script>
 (function() {
-  const container = document.getElementById('log-container');
-  const autoCheck = document.getElementById('log-auto-refresh');
-  const refreshBtn = document.getElementById('log-refresh-btn');
-  let timer = null;
+  const loadBtn = document.getElementById('load-espn-btn');
+  const statusEl = document.getElementById('espn-status');
+  const eventsBody = document.getElementById('espn-events-body');
+  const modal = document.getElementById('analysis-modal');
+  const closeModalBtn = document.getElementById('close-analysis-modal');
+  const modalTitle = document.getElementById('analysis-modal-title');
+  const modalBody = document.getElementById('analysis-modal-body');
 
-  function levelClass(level) {
-    switch(level) {
-      case 'ERROR': return 'log-error';
-      case 'WARNING': return 'log-warn';
-      case 'INFO': return 'log-info';
-      case 'DEBUG': return 'log-debug';
-      default: return 'log-debug';
-    }
-  }
+  let currentEvents = [];
 
   function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = String(text ?? '');
     return div.innerHTML;
   }
 
-  async function fetchLogs() {
+  function setStatus(msg, isError=false) {
+    statusEl.textContent = msg;
+    statusEl.classList.toggle('error-text', isError);
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '-';
+    return iso.replace('T', ' ').replace('+00:00', ' UTC');
+  }
+
+  function renderEvents(events) {
+    if (!events.length) {
+      eventsBody.innerHTML = '<tr><td colspan="5" class="table-empty">No se encontraron partidos.</td></tr>';
+      return;
+    }
+    let html = '';
+    events.forEach((event, index) => {
+      html += '<tr>'
+        + '<td><span class="league-badge ' + escapeHtml(String((event.league || '').toLowerCase())) + '">' + escapeHtml(event.league || '-') + '</span></td>'
+        + '<td><strong>' + escapeHtml(event.away_team) + '</strong> vs <strong>' + escapeHtml(event.home_team) + '</strong></td>'
+        + '<td>' + escapeHtml(formatDate(event.start_time_utc)) + '</td>'
+        + '<td><span class="status-' + escapeHtml((event.status || '').toLowerCase()) + '">' + escapeHtml(event.status || '-') + '</span></td>'
+        + '<td><button class="btn btn-secondary btn-sm analyze-btn" data-idx="' + index + '">Analizar partido</button></td>'
+        + '</tr>';
+    });
+    eventsBody.innerHTML = html;
+  }
+
+  async function fetchEspnEvents() {
+    setStatus('Cargando partidos ESPN...');
+    loadBtn.disabled = true;
     try {
-      const resp = await fetch('/api/logs?limit=80');
+      const resp = await fetch('/api/espn/events?league=NBA');
       const data = await resp.json();
-      if (!data.entries || data.entries.length === 0) {
-        container.innerHTML = '<div class="log-empty">No hay logs todavia. El sistema esta iniciando...</div>';
+      if (!data.ok) {
+        setStatus('Error cargando ESPN: ' + (data.error || 'desconocido'), true);
+        eventsBody.innerHTML = '<tr><td colspan="5" class="table-empty">No se pudieron cargar partidos.</td></tr>';
         return;
       }
-      let html = '';
-      for (const entry of data.entries) {
-        const cls = levelClass(entry.level);
-        html += '<div class="log-line ' + cls + '">'
-          + '<span class="log-ts">' + escapeHtml(entry.timestamp) + '</span>'
-          + '<span class="log-lvl">' + escapeHtml(entry.level) + '</span>'
-          + '<span class="log-src">' + escapeHtml(entry.logger.replace('app.', '')) + '</span>'
-          + '<span class="log-msg">' + escapeHtml(entry.message) + '</span>'
-          + '</div>';
-      }
-      container.innerHTML = html;
-    } catch(e) {
-      container.innerHTML = '<div class="log-empty">Error cargando logs: ' + escapeHtml(String(e)) + '</div>';
+      currentEvents = data.events || [];
+      renderEvents(currentEvents);
+      setStatus('Partidos cargados: ' + currentEvents.length);
+    } catch (e) {
+      setStatus('Error de red cargando partidos: ' + String(e), true);
+    } finally {
+      loadBtn.disabled = false;
     }
   }
 
-  function startAutoRefresh() {
-    stopAutoRefresh();
-    fetchLogs();
-    timer = setInterval(fetchLogs, 5000);
+  function openModal() {
+    modal.classList.remove('hidden');
   }
 
-  function stopAutoRefresh() {
-    if (timer) { clearInterval(timer); timer = null; }
+  function closeModal() {
+    modal.classList.add('hidden');
+    modalBody.innerHTML = '';
   }
 
-  autoCheck.addEventListener('change', function() {
-    if (this.checked) startAutoRefresh();
-    else stopAutoRefresh();
+  function renderNonPickResponse(analysis) {
+    const message = analysis.message || 'Respuesta no estandar de IA';
+    return '<div class="notice notice-warning"><strong>' + escapeHtml(message) + '</strong></div>'
+      + '<pre class="raw-block">' + escapeHtml(JSON.stringify(analysis.raw_result, null, 2)) + '</pre>';
+  }
+
+  function pickCard(event, pick, rawAiJson, idx) {
+    return '<div class="pick-card">'
+      + '<div class="pick-grid">'
+      + '<div><strong>Resultado:</strong> ' + escapeHtml(pick.result) + '</div>'
+      + '<div><strong>Market:</strong> ' + escapeHtml(pick.market || '-') + '</div>'
+      + '<div><strong>Seleccion:</strong> ' + escapeHtml(pick.selection || '-') + '</div>'
+      + '<div><strong>Cuota:</strong> ' + escapeHtml(pick.odds || '-') + '</div>'
+      + '<div><strong>Confianza:</strong> ' + escapeHtml(pick.confidence) + '%</div>'
+      + '<div><strong>EV:</strong> ' + escapeHtml(pick.ev || '-') + '</div>'
+      + '</div>'
+      + '<div class="mt-2"><button class="btn btn-primary btn-sm save-pick-btn" data-pick-idx="' + idx + '">Guardar pick</button></div>'
+      + '</div>';
+  }
+
+  async function analyzeEvent(event) {
+    modalTitle.textContent = 'Analisis IA: ' + (event.away_team || '-') + ' vs ' + (event.home_team || '-');
+    modalBody.innerHTML = '<p class="text-muted">Analizando partido con IA...</p>';
+    openModal();
+
+    try {
+      const resp = await fetch('/api/ai/analyze-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event })
+      });
+      const analysis = await resp.json();
+      if (!analysis.ok) {
+        modalBody.innerHTML = '<div class="notice notice-error">' + escapeHtml(analysis.message || 'Error analizando partido') + '</div>';
+        return;
+      }
+
+      if (analysis.analysis_type !== 'picks') {
+        modalBody.innerHTML = renderNonPickResponse(analysis);
+        return;
+      }
+
+      const picks = analysis.picks || [];
+      if (!picks.length) {
+        modalBody.innerHTML = renderNonPickResponse(analysis);
+        return;
+      }
+
+      let html = '';
+      picks.forEach((pick, idx) => {
+        html += pickCard(event, pick, analysis.raw_ai_json, idx);
+      });
+      modalBody.innerHTML = html;
+
+      modalBody.querySelectorAll('.save-pick-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const pickIdx = Number(btn.dataset.pickIdx);
+          const pick = picks[pickIdx];
+          btn.disabled = true;
+          btn.textContent = 'Guardando...';
+          try {
+            const saveResp = await fetch('/api/picks/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ event, pick, raw_ai_json: analysis.raw_ai_json })
+            });
+            const saveData = await saveResp.json();
+            if (!saveResp.ok || !saveData.ok) {
+              throw new Error(saveData.detail || saveData.message || 'No se pudo guardar');
+            }
+            btn.textContent = 'Guardado ✅';
+            window.setTimeout(() => window.location.reload(), 500);
+          } catch (e) {
+            btn.disabled = false;
+            btn.textContent = 'Guardar pick';
+            alert('Error guardando pick: ' + String(e));
+          }
+        });
+      });
+    } catch (e) {
+      modalBody.innerHTML = '<div class="notice notice-error">Error llamando analisis IA: ' + escapeHtml(String(e)) + '</div>';
+    }
+  }
+
+  eventsBody.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const btn = target.closest('.analyze-btn');
+    if (!btn) return;
+    const idx = Number(btn.dataset.idx);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= currentEvents.length) return;
+    analyzeEvent(currentEvents[idx]);
   });
 
-  refreshBtn.addEventListener('click', fetchLogs);
-  startAutoRefresh();
+  closeModalBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeModal();
+  });
+  loadBtn.addEventListener('click', fetchEspnEvents);
 })();
 </script>
 {% endblock %}
