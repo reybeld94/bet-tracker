@@ -150,7 +150,23 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
             job.attempts += 1
             job.last_error = str(exc)
             job.updated_at_utc = _utcnow()
-            job.status = "failed"
+            if job.attempts <= settings_snapshot.auto_picks_max_retries:
+                job.status = "queued"
+                job.run_at_utc = _utcnow()
+                logger.info(
+                    "Job #%d re-queued (%d/%d attempts)",
+                    job_id,
+                    job.attempts,
+                    settings_snapshot.auto_picks_max_retries,
+                )
+            else:
+                job.status = "failed"
+                logger.error(
+                    "Job #%d exhausted retries (%d/%d)",
+                    job_id,
+                    job.attempts,
+                    settings_snapshot.auto_picks_max_retries,
+                )
             job.locked_at_utc = None
             job.lock_owner = None
             db.commit()
@@ -199,6 +215,14 @@ async def run_worker_with_shutdown(stop_event: asyncio.Event) -> None:
 
         if not has_key:
             logger.warning("Worker poll: no OpenAI API key configured — skipping")
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=settings_snapshot.auto_picks_poll_seconds,
+                )
+            except asyncio.TimeoutError:
+                continue
+            continue
         else:
             logger.debug(
                 "Worker poll: api_key=configured model=%s concurrency=%d poll=%ds",
