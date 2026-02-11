@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 import asyncio
+import json
 import logging
 import os
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -13,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from app.ai.openai_client import OpenAIClientError, request_pick
 from app.db import get_db
 from app.ingestion.espn_client import fetch_scoreboard, normalize_dates
 from app.ingestion.leagues import LEAGUE_PATHS
@@ -21,6 +24,7 @@ from app.ingestion.sync import sync_games_for_date
 from app.log_buffer import install_buffer_handler, get_buffer_handler
 from app.models import Game, Pick, PickJob
 from app.picks.enqueue import enqueue_due_games
+from app.picks.payload import build_game_payload
 from app.picks.worker import run_worker_with_shutdown
 from app.schemas import GameOut, GamesTodayResponse, PickJobOut, PickOut
 from app.settings import encrypt_api_key, get_or_create_settings
@@ -147,21 +151,6 @@ def home(request: Request, db: Session = Depends(get_db)):
         "no_bet": sum(1 for pick in picks if pick.result == "NO_BET"),
     }
 
-    # Job stats for the activity log panel
-    total_games = db.query(Game).count()
-    jobs_queued = db.query(PickJob).filter(PickJob.status == "queued").count()
-    jobs_running = db.query(PickJob).filter(PickJob.status == "running").count()
-    jobs_done = db.query(PickJob).filter(PickJob.status == "done").count()
-    jobs_failed = db.query(PickJob).filter(PickJob.status == "failed").count()
-
-    job_stats = {
-        "total_games": total_games,
-        "queued": jobs_queued,
-        "running": jobs_running,
-        "done": jobs_done,
-        "failed": jobs_failed,
-    }
-
     return templates.TemplateResponse(
         "index.html",
         {
@@ -169,7 +158,6 @@ def home(request: Request, db: Session = Depends(get_db)):
             "picks": picks,
             "stats": stats,
             "games": game_lookup,
-            "job_stats": job_stats,
             "active_page": "home",
         },
     )
@@ -322,6 +310,157 @@ def api_espn_scoreboard(
     }
 
 
+@app.get("/api/espn/events")
+def api_espn_events(league: str = "NBA", date: str | None = None):
+    normalized_league = league.strip().upper() if league else "NBA"
+    payload = fetch_scoreboard(normalized_league, date)
+    if payload.get("error"):
+        return {
+            "ok": False,
+            "league": normalized_league,
+            "error": payload.get("error"),
+            "details": payload,
+            "events": [],
+        }
+
+    events = _scoreboard_events(payload, normalized_league)
+    return {
+        "ok": True,
+        "league": normalized_league,
+        "count": len(events),
+        "events": events,
+    }
+
+
+@app.post("/api/ai/analyze-event")
+def api_ai_analyze_event(payload: dict, db: Session = Depends(get_db)):
+    event = payload.get("event")
+    if not isinstance(event, dict):
+        raise HTTPException(status_code=400, detail="'event' is required")
+
+    settings = get_or_create_settings(db)
+    game_stub = SimpleNamespace(
+        sport=event.get("sport") or "basketball",
+        league=(event.get("league") or "").upper(),
+        home_team=event.get("home_team") or "TBD",
+        away_team=event.get("away_team") or "TBD",
+        start_time_utc=_parse_event_start(event.get("start_time_utc")),
+    )
+    ai_payload = build_game_payload(game_stub, settings)
+    ai_payload["provider_event_id"] = event.get("provider_event_id")
+
+    try:
+        ai_result, raw_ai_json = request_pick(ai_payload, settings)
+    except OpenAIClientError as exc:
+        return {
+            "ok": False,
+            "event": event,
+            "message": str(exc),
+            "analysis_type": "error",
+        }
+
+    picks: list[dict] = []
+    message = ""
+    analysis_type = "picks"
+
+    if isinstance(ai_result, dict) and isinstance(ai_result.get("picks"), list):
+        picks = [pick for pick in ai_result["picks"] if isinstance(pick, dict)]
+    elif isinstance(ai_result, dict) and "result" in ai_result:
+        picks = [ai_result]
+    else:
+        analysis_type = "non_pick"
+        message = "La IA respondio un formato distinto a picks."
+
+    return {
+        "ok": True,
+        "event": event,
+        "analysis_type": analysis_type,
+        "message": message,
+        "picks": picks,
+        "raw_result": ai_result,
+        "raw_ai_json": raw_ai_json,
+    }
+
+
+@app.post("/api/picks/save")
+def api_save_pick(payload: dict, db: Session = Depends(get_db)):
+    event = payload.get("event")
+    pick_payload = payload.get("pick")
+    raw_ai_json = payload.get("raw_ai_json") or ""
+
+    if not isinstance(event, dict) or not isinstance(pick_payload, dict):
+        raise HTTPException(status_code=400, detail="'event' and 'pick' are required")
+
+    provider_event_id = str(event.get("provider_event_id") or "").strip()
+    if not provider_event_id:
+        raise HTTPException(status_code=400, detail="event.provider_event_id is required")
+
+    required_pick_fields = {
+        "result", "market", "emoji", "selection", "line", "odds_format", "odds",
+        "p_est", "p_implied", "ev", "confidence", "stake_u", "high_prob_low_payout",
+        "is_value", "reasons", "risks", "triggers", "missing_data", "as_of_utc", "notes",
+    }
+    missing = sorted(required_pick_fields - set(pick_payload.keys()))
+    if missing:
+        raise HTTPException(status_code=400, detail=f"pick missing fields: {', '.join(missing)}")
+
+    game = db.query(Game).filter(
+        Game.provider == "espn",
+        Game.provider_event_id == provider_event_id,
+    ).one_or_none()
+
+    now_utc = datetime.now(timezone.utc)
+    if not game:
+        game = Game(
+            provider="espn",
+            provider_event_id=provider_event_id,
+            sport=str(event.get("sport") or ""),
+            league=str(event.get("league") or "").upper(),
+            start_time_utc=_parse_event_start(event.get("start_time_utc")),
+            status=str(event.get("status") or "scheduled"),
+            home_team=str(event.get("home_team") or "TBD"),
+            away_team=str(event.get("away_team") or "TBD"),
+            raw_json=json.dumps(event, ensure_ascii=False),
+        )
+        db.add(game)
+        db.flush()
+
+    pick = db.query(Pick).filter(Pick.game_id == game.id).one_or_none()
+    if not pick:
+        pick = Pick(game_id=game.id, created_at_utc=now_utc)
+        db.add(pick)
+
+    pick.result = pick_payload["result"]
+    pick.market = pick_payload["market"]
+    pick.emoji = pick_payload["emoji"]
+    pick.selection = pick_payload["selection"]
+    pick.line = pick_payload["line"]
+    pick.odds_format = pick_payload["odds_format"]
+    pick.odds = pick_payload["odds"]
+    pick.p_est = pick_payload["p_est"]
+    pick.p_implied = pick_payload["p_implied"]
+    pick.ev = pick_payload["ev"]
+    pick.confidence = pick_payload["confidence"]
+    pick.stake_u = pick_payload["stake_u"]
+    pick.high_prob_low_payout = pick_payload["high_prob_low_payout"]
+    pick.is_value = pick_payload["is_value"]
+    pick.reasons_json = json.dumps(pick_payload["reasons"], ensure_ascii=False)
+    pick.risks_json = json.dumps(pick_payload["risks"], ensure_ascii=False)
+    pick.triggers_json = json.dumps(pick_payload["triggers"], ensure_ascii=False)
+    pick.missing_data_json = json.dumps(pick_payload["missing_data"], ensure_ascii=False)
+    pick.as_of_utc = pick_payload["as_of_utc"]
+    pick.notes = pick_payload["notes"]
+    pick.raw_ai_json = raw_ai_json
+    pick.updated_at_utc = now_utc
+    db.commit()
+
+    return {
+        "ok": True,
+        "pick_id": pick.id,
+        "game_id": game.id,
+    }
+
+
 @app.get("/api/logs")
 def api_logs(limit: int = 100):
     handler = get_buffer_handler()
@@ -353,3 +492,30 @@ def ny_date_range_utc(day: date) -> tuple[datetime, datetime]:
     start_local = datetime.combine(day, datetime.min.time(), tzinfo=ny_tz)
     end_local = start_local + timedelta(days=1)
     return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
+
+
+def _parse_event_start(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _scoreboard_events(payload: dict, league: str) -> list[dict]:
+    parsed_games = parse_scoreboard(payload, league)
+    events: list[dict] = []
+    for game in parsed_games:
+        events.append(
+            {
+                "provider_event_id": game.provider_event_id,
+                "sport": game.sport,
+                "league": game.league,
+                "home_team": game.home_team_name,
+                "away_team": game.away_team_name,
+                "status": game.status,
+                "start_time_utc": game.start_time_utc.isoformat() if game.start_time_utc else None,
+            }
+        )
+    return events
