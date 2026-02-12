@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import requests
 
 MAX_ERROR_SNIPPET = 2000
+OPENAI_CONNECT_TIMEOUT_SECONDS = 15
+OPENAI_READ_TIMEOUT_SECONDS = 150
+OPENAI_MAX_ATTEMPTS = 3
 
 from app.ai.prompt import DEV_PROMPT
 from app.ai.schema import PICK_SCHEMA
@@ -118,15 +122,31 @@ def request_pick(payload: dict[str, Any], settings) -> tuple[dict[str, Any], str
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/responses",
-            headers=headers,
-            json=body,
-            timeout=90,
-        )
-    except requests.RequestException as exc:
-        raise OpenAIClientError(f"OpenAI request failed: {exc}") from exc
+    response = None
+    last_exception: requests.RequestException | None = None
+    for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/responses",
+                headers=headers,
+                json=body,
+                timeout=(OPENAI_CONNECT_TIMEOUT_SECONDS, OPENAI_READ_TIMEOUT_SECONDS),
+            )
+            break
+        except requests.Timeout as exc:
+            last_exception = exc
+            if attempt == OPENAI_MAX_ATTEMPTS:
+                break
+            time.sleep(attempt)
+        except requests.RequestException as exc:
+            raise OpenAIClientError(f"OpenAI request failed: {exc}") from exc
+
+    if response is None:
+        assert last_exception is not None
+        raise OpenAIClientError(
+            "OpenAI request failed after retries due to timeout. "
+            f"Try lowering reasoning effort or retrying later. Last error: {last_exception}"
+        ) from last_exception
 
     raw_response_text = response.text
     try:
