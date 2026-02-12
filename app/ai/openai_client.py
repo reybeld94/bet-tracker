@@ -10,7 +10,7 @@ MAX_ERROR_SNIPPET = 2000
 OPENAI_CONNECT_TIMEOUT_SECONDS = 15
 OPENAI_READ_TIMEOUT_SECONDS = 150
 OPENAI_MAX_ATTEMPTS = 3
-OPENAI_MAX_OUTPUT_TOKENS = 900
+OPENAI_OUTPUT_TOKEN_BUDGETS = (900, 1800, 3000)
 
 _EFFORT_FALLBACKS: dict[str, tuple[str, ...]] = {
     "high": ("high", "medium", "low"),
@@ -94,7 +94,7 @@ def _build_response_payload(model: str, reasoning_effort: str, payload: dict[str
             },
         ],
         "tools": [{"type": "web_search_preview"}],
-        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
+        "max_output_tokens": OPENAI_OUTPUT_TOKEN_BUDGETS[0],
         "text": {
             "format": {
                 "type": "json_schema",
@@ -103,6 +103,15 @@ def _build_response_payload(model: str, reasoning_effort: str, payload: dict[str
             }
         },
     }
+
+
+def _is_max_output_tokens_incomplete(response_json: dict[str, Any]) -> bool:
+    if response_json.get("status") != "incomplete":
+        return False
+    incomplete_details = response_json.get("incomplete_details")
+    if not isinstance(incomplete_details, dict):
+        return False
+    return incomplete_details.get("reason") == "max_output_tokens"
 
 
 def _effort_sequence(reasoning_effort: str) -> tuple[str, ...]:
@@ -130,63 +139,81 @@ def request_pick(payload: dict[str, Any], settings) -> tuple[dict[str, Any], str
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    response = None
     last_exception: requests.RequestException | None = None
+    last_missing_output_response: dict[str, Any] | None = None
+
     for effort in _effort_sequence(settings.openai_reasoning_effort):
-        body = _build_response_payload(settings.openai_model, effort, payload)
-        for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
-            try:
-                response = requests.post(
-                    "https://api.openai.com/v1/responses",
-                    headers=headers,
-                    json=body,
-                    timeout=(OPENAI_CONNECT_TIMEOUT_SECONDS, OPENAI_READ_TIMEOUT_SECONDS),
-                )
-                break
-            except requests.Timeout as exc:
-                last_exception = exc
-                if attempt == OPENAI_MAX_ATTEMPTS:
+        for max_output_tokens in OPENAI_OUTPUT_TOKEN_BUDGETS:
+            body = _build_response_payload(settings.openai_model, effort, payload)
+            body["max_output_tokens"] = max_output_tokens
+
+            post_response = None
+            for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
+                try:
+                    post_response = requests.post(
+                        "https://api.openai.com/v1/responses",
+                        headers=headers,
+                        json=body,
+                        timeout=(OPENAI_CONNECT_TIMEOUT_SECONDS, OPENAI_READ_TIMEOUT_SECONDS),
+                    )
                     break
-                time.sleep(attempt)
-            except requests.RequestException as exc:
-                raise OpenAIClientError(f"OpenAI request failed: {exc}") from exc
+                except requests.Timeout as exc:
+                    last_exception = exc
+                    if attempt == OPENAI_MAX_ATTEMPTS:
+                        break
+                    time.sleep(attempt)
+                except requests.RequestException as exc:
+                    raise OpenAIClientError(f"OpenAI request failed: {exc}") from exc
 
-        if response is not None:
-            break
+            if post_response is None:
+                continue
 
-    if response is None:
-        assert last_exception is not None
+            raw_response_text = post_response.text
+            try:
+                response_json = post_response.json()
+            except ValueError as exc:
+                if post_response.status_code >= 400:
+                    raise OpenAIClientError(
+                        f"OpenAI API error {post_response.status_code}: non-JSON response={_truncate(raw_response_text)}"
+                    ) from exc
+                raise OpenAIClientError(
+                    "OpenAI API returned non-JSON response: " + _truncate(raw_response_text)
+                ) from exc
+
+            if post_response.status_code >= 400:
+                raise OpenAIClientError(
+                    f"OpenAI API error {post_response.status_code}: {_response_debug_summary(response_json)}"
+                )
+
+            output_text = _extract_output_text(response_json)
+            if output_text:
+                try:
+                    parsed = json.loads(output_text)
+                except json.JSONDecodeError as exc:
+                    raise OpenAIClientError(
+                        "OpenAI response was not valid JSON; output_text=" + _truncate(output_text)
+                    ) from exc
+                return parsed, json.dumps(response_json, ensure_ascii=False)
+
+            if _is_max_output_tokens_incomplete(response_json):
+                last_missing_output_response = response_json
+                continue
+
+            raise OpenAIClientError(
+                "OpenAI response missing output_text: " + _response_debug_summary(response_json)
+            )
+
+    if last_missing_output_response is not None:
+        raise OpenAIClientError(
+            "OpenAI response missing output_text after token-budget retries: "
+            + _response_debug_summary(last_missing_output_response)
+        )
+
+    if last_exception is not None:
         raise OpenAIClientError(
             "OpenAI request failed after retries due to timeout. "
-            "Tried reasoning-effort fallback automatically; retry later if it persists. "
+            "Tried token-budget and reasoning-effort fallbacks automatically; retry later if it persists. "
             f"Last error: {last_exception}"
         ) from last_exception
 
-    raw_response_text = response.text
-    try:
-        response_json = response.json()
-    except ValueError as exc:
-        if response.status_code >= 400:
-            raise OpenAIClientError(
-                f"OpenAI API error {response.status_code}: non-JSON response={_truncate(raw_response_text)}"
-            ) from exc
-        raise OpenAIClientError(
-            "OpenAI API returned non-JSON response: " + _truncate(raw_response_text)
-        ) from exc
-
-    if response.status_code >= 400:
-        raise OpenAIClientError(
-            f"OpenAI API error {response.status_code}: {_response_debug_summary(response_json)}"
-        )
-    output_text = _extract_output_text(response_json)
-    if not output_text:
-        raise OpenAIClientError(
-            "OpenAI response missing output_text: " + _response_debug_summary(response_json)
-        )
-    try:
-        parsed = json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise OpenAIClientError(
-            "OpenAI response was not valid JSON; output_text=" + _truncate(output_text)
-        ) from exc
-    return parsed, json.dumps(response_json, ensure_ascii=False)
+    raise OpenAIClientError("OpenAI request failed before receiving a valid response")
