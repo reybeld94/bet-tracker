@@ -10,6 +10,13 @@ MAX_ERROR_SNIPPET = 2000
 OPENAI_CONNECT_TIMEOUT_SECONDS = 15
 OPENAI_READ_TIMEOUT_SECONDS = 150
 OPENAI_MAX_ATTEMPTS = 3
+OPENAI_MAX_OUTPUT_TOKENS = 900
+
+_EFFORT_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "high": ("high", "medium", "low"),
+    "medium": ("medium", "low"),
+    "low": ("low",),
+}
 
 from app.ai.prompt import DEV_PROMPT
 from app.ai.schema import PICK_SCHEMA
@@ -87,6 +94,7 @@ def _build_response_payload(model: str, reasoning_effort: str, payload: dict[str
             },
         ],
         "tools": [{"type": "web_search_preview"}],
+        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
         "text": {
             "format": {
                 "type": "json_schema",
@@ -95,6 +103,11 @@ def _build_response_payload(model: str, reasoning_effort: str, payload: dict[str
             }
         },
     }
+
+
+def _effort_sequence(reasoning_effort: str) -> tuple[str, ...]:
+    normalized = (reasoning_effort or "").strip().lower()
+    return _EFFORT_FALLBACKS.get(normalized, ("medium", "low"))
 
 
 def _extract_output_text(response_json: dict[str, Any]) -> str:
@@ -113,39 +126,40 @@ def request_pick(payload: dict[str, Any], settings) -> tuple[dict[str, Any], str
     if not api_key:
         raise OpenAIClientError("Missing OpenAI API key")
 
-    body = _build_response_payload(
-        settings.openai_model,
-        settings.openai_reasoning_effort,
-        payload,
-    )
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     response = None
     last_exception: requests.RequestException | None = None
-    for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
-        try:
-            response = requests.post(
-                "https://api.openai.com/v1/responses",
-                headers=headers,
-                json=body,
-                timeout=(OPENAI_CONNECT_TIMEOUT_SECONDS, OPENAI_READ_TIMEOUT_SECONDS),
-            )
-            break
-        except requests.Timeout as exc:
-            last_exception = exc
-            if attempt == OPENAI_MAX_ATTEMPTS:
+    for effort in _effort_sequence(settings.openai_reasoning_effort):
+        body = _build_response_payload(settings.openai_model, effort, payload)
+        for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
+            try:
+                response = requests.post(
+                    "https://api.openai.com/v1/responses",
+                    headers=headers,
+                    json=body,
+                    timeout=(OPENAI_CONNECT_TIMEOUT_SECONDS, OPENAI_READ_TIMEOUT_SECONDS),
+                )
                 break
-            time.sleep(attempt)
-        except requests.RequestException as exc:
-            raise OpenAIClientError(f"OpenAI request failed: {exc}") from exc
+            except requests.Timeout as exc:
+                last_exception = exc
+                if attempt == OPENAI_MAX_ATTEMPTS:
+                    break
+                time.sleep(attempt)
+            except requests.RequestException as exc:
+                raise OpenAIClientError(f"OpenAI request failed: {exc}") from exc
+
+        if response is not None:
+            break
 
     if response is None:
         assert last_exception is not None
         raise OpenAIClientError(
             "OpenAI request failed after retries due to timeout. "
-            f"Try lowering reasoning effort or retrying later. Last error: {last_exception}"
+            "Tried reasoning-effort fallback automatically; retry later if it persists. "
+            f"Last error: {last_exception}"
         ) from last_exception
 
     raw_response_text = response.text
