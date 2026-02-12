@@ -95,7 +95,7 @@ def _build_response_payload(model: str, reasoning_effort: str, payload: dict[str
             },
         ],
         "tools": [{"type": "web_search_preview"}],
-        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
+        "max_output_tokens": OPENAI_OUTPUT_TOKEN_BUDGETS[0],
         "text": {
             "format": {
                 "type": "json_schema",
@@ -140,7 +140,6 @@ def request_pick(payload: dict[str, Any], settings) -> tuple[dict[str, Any], str
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    response = None
     last_exception: requests.RequestException | None = None
     last_missing_output_response: dict[str, Any] | None = None
     for effort in _effort_sequence(settings.openai_reasoning_effort):

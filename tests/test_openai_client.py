@@ -6,7 +6,12 @@ import requests
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.ai.openai_client import OpenAIClientError, _build_response_payload, request_pick
+from app.ai.openai_client import (
+    OPENAI_OUTPUT_TOKEN_BUDGETS,
+    OpenAIClientError,
+    _build_response_payload,
+    request_pick,
+)
 
 
 class _FakeResponse:
@@ -37,9 +42,7 @@ class OpenAIClientTests(unittest.TestCase):
         response_payload = {
             "status": "incomplete",
             "incomplete_details": {"reason": "max_output_tokens"},
-            "output": [
-                {"content": [{"type": "summary_text", "text": "partial response"}]}
-            ],
+            "output": [{"content": [{"type": "summary_text", "text": "partial response"}]}],
         }
 
         with patch("app.ai.openai_client.requests.post", return_value=_FakeResponse(200, response_payload)):
