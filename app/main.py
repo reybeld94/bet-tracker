@@ -365,8 +365,6 @@ def api_ai_analyze_event(payload: dict, db: Session = Depends(get_db)):
 
     if isinstance(ai_result, dict) and isinstance(ai_result.get("picks"), list):
         picks = [pick for pick in ai_result["picks"] if isinstance(pick, dict)]
-    elif isinstance(ai_result, dict) and "result" in ai_result:
-        picks = [ai_result]
     else:
         analysis_type = "non_pick"
         message = "La IA respondio un formato distinto a picks."
@@ -425,10 +423,8 @@ def api_save_pick(payload: dict, db: Session = Depends(get_db)):
         db.add(game)
         db.flush()
 
-    pick = db.query(Pick).filter(Pick.game_id == game.id).one_or_none()
-    if not pick:
-        pick = Pick(game_id=game.id, created_at_utc=now_utc)
-        db.add(pick)
+    pick = Pick(game_id=game.id, created_at_utc=now_utc)
+    db.add(pick)
 
     pick.result = pick_payload["result"]
     pick.market = pick_payload["market"]

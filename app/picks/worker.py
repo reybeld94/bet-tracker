@@ -142,13 +142,19 @@ def _requeue_stale_running_jobs(current_lock_owner: str) -> int:
 
 
 def _coerce_no_odds(ai_payload: dict, missing_label: str = "odds") -> dict:
-    missing_data = list(ai_payload.get("missing_data") or [])
-    if missing_label not in missing_data:
-        missing_data.append(missing_label)
-    ai_payload["missing_data"] = missing_data
-    ai_payload["result"] = "NO_BET"
-    ai_payload["stake_u"] = 0
-    ai_payload["is_value"] = False
+    picks = ai_payload.get("picks") if isinstance(ai_payload, dict) else None
+    if not isinstance(picks, list):
+        return ai_payload
+    for pick in picks:
+        if not isinstance(pick, dict):
+            continue
+        missing_data = list(pick.get("missing_data") or [])
+        if missing_label not in missing_data:
+            missing_data.append(missing_label)
+        pick["missing_data"] = missing_data
+        pick["result"] = "NO_BET"
+        pick["stake_u"] = 0
+        pick["is_value"] = False
     return ai_payload
 
 
@@ -169,10 +175,8 @@ def _is_in_pregame_window(
 
 def _upsert_pick(db, game_id: int, ai_payload: dict, raw_ai_json: str) -> None:
     now = _utcnow()
-    pick = db.query(Pick).filter(Pick.game_id == game_id).one_or_none()
-    if not pick:
-        pick = Pick(game_id=game_id, created_at_utc=now)
-        db.add(pick)
+    pick = Pick(game_id=game_id, created_at_utc=now)
+    db.add(pick)
 
     pick.result = ai_payload["result"]
     pick.market = ai_payload["market"]
@@ -241,27 +245,29 @@ def _process_job_sync(job_id: int, settings_snapshot, lock_owner: str) -> None:
                         job_id, game.home_team, game.away_team, game.league,
                         game.start_time_utc)
 
-            existing_pick = db.query(Pick).filter(Pick.game_id == job.game_id).one_or_none()
-            if existing_pick is not None:
-                logger.info("Job #%d: pick already exists for game #%d, marking done", job_id, job.game_id)
-                job.status = "done"
-                job.updated_at_utc = _utcnow()
-                db.commit()
-                return
-
             logger.info("Job #%d: calling OpenAI (model=%s, effort=%s) ...",
                         job_id, settings_snapshot.openai_model, settings_snapshot.openai_reasoning_effort)
             payload = build_game_payload(game, settings_snapshot)
-            ai_payload, raw_ai_json = request_pick(payload, settings_snapshot)
+            ai_response, raw_ai_json = request_pick(payload, settings_snapshot)
 
             if payload["odds"] is None:
                 logger.info("Job #%d: no odds available, coercing to NO_BET", job_id)
-                ai_payload = _coerce_no_odds(ai_payload)
+                ai_response = _coerce_no_odds(ai_response)
 
-            _upsert_pick(db, game.id, ai_payload, raw_ai_json)
+            picks = ai_response.get("picks") if isinstance(ai_response, dict) else None
+            if not isinstance(picks, list) or not picks:
+                raise OpenAIClientError("AI response missing picks array")
+
+            selected_pick = next((p for p in picks if isinstance(p, dict) and p.get("result") != "NO_BET"), None)
+            if selected_pick is None:
+                selected_pick = next((p for p in picks if isinstance(p, dict)), None)
+            if selected_pick is None:
+                raise OpenAIClientError("AI response had no valid pick objects")
+
+            _upsert_pick(db, game.id, selected_pick, raw_ai_json)
             logger.info("Job #%d: pick saved -> result=%s market=%s confidence=%s ev=%s",
-                        job_id, ai_payload.get("result"), ai_payload.get("market"),
-                        ai_payload.get("confidence"), ai_payload.get("ev"))
+                        job_id, selected_pick.get("result"), selected_pick.get("market"),
+                        selected_pick.get("confidence"), selected_pick.get("ev"))
 
             job.status = "done"
             job.updated_at_utc = _utcnow()

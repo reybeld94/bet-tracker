@@ -82,6 +82,7 @@ def _build_response_payload(model: str, reasoning_effort: str, payload: dict[str
                 ],
             },
         ],
+        "tools": [{"type": "web_search_preview"}],
         "text": {
             "format": {
                 "type": "json_schema",
