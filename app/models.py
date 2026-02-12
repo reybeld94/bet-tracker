@@ -88,9 +88,6 @@ class PickJob(Base):
 
 class Pick(Base):
     __tablename__ = "picks"
-    __table_args__ = (
-        UniqueConstraint("game_id", name="uq_picks_game_id"),
-    )
 
     id = Column(Integer, primary_key=True, index=True)
     game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
