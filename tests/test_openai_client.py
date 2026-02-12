@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+
+import requests
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -48,6 +50,45 @@ class OpenAIClientTests(unittest.TestCase):
         self.assertIn("missing output_text", msg)
         self.assertIn("status=incomplete", msg)
         self.assertIn("incomplete_reason=max_output_tokens", msg)
+
+    def test_request_pick_retries_on_timeout_then_succeeds(self) -> None:
+        settings = SimpleNamespace(
+            openai_api_key_enc="key",
+            openai_model="gpt-5",
+            openai_reasoning_effort="high",
+        )
+        response_payload = {"output_text": "{\"pick\":\"A\"}"}
+
+        with patch(
+            "app.ai.openai_client.requests.post",
+            side_effect=[
+                requests.Timeout("first timeout"),
+                _FakeResponse(200, response_payload),
+            ],
+        ) as mock_post, patch("app.ai.openai_client.time.sleep") as mock_sleep:
+            parsed, _raw = request_pick({"league": "NBA"}, settings)
+
+        self.assertEqual({"pick": "A"}, parsed)
+        self.assertEqual(2, mock_post.call_count)
+        self.assertEqual((1,), mock_sleep.call_args.args)
+
+    def test_request_pick_timeout_after_max_attempts(self) -> None:
+        settings = SimpleNamespace(
+            openai_api_key_enc="key",
+            openai_model="gpt-5",
+            openai_reasoning_effort="high",
+        )
+
+        with patch(
+            "app.ai.openai_client.requests.post",
+            side_effect=requests.Timeout("read timeout"),
+        ) as mock_post, patch("app.ai.openai_client.time.sleep") as mock_sleep:
+            with self.assertRaises(OpenAIClientError) as ctx:
+                request_pick({"league": "NBA"}, settings)
+
+        self.assertIn("failed after retries due to timeout", str(ctx.exception))
+        self.assertEqual(3, mock_post.call_count)
+        self.assertEqual(2, mock_sleep.call_count)
 
 
 if __name__ == "__main__":
